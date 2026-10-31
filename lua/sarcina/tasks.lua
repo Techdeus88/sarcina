@@ -16,6 +16,7 @@ M._plugins = {}
 M._order = {}
 M._running = 0
 M._started = false
+M._quiet = false
 M._callbacks = {}
 
 local run_job, pump
@@ -43,6 +44,11 @@ function M.snapshot()
 		counts[job.status] = counts[job.status] + 1
 	end
 	return { jobs = M._jobs, counts = counts, total = #M._jobs }
+end
+
+function M.plugin_failed(name)
+	local plugin = M._plugins[name]
+	return plugin ~= nil and plugin.failed == true
 end
 
 -- Evaluate a `when` Lua expression safely; returns true if missing.
@@ -127,6 +133,9 @@ local function settle()
 	M._started = false
 	local counts = M.snapshot().counts
 	local summary = { total = #M._jobs, done = counts.done, failed = counts.failed, skipped = counts.skipped }
+	if M._quiet then
+		summary.quiet = true
+	end
 	ui.emit("done", summary)
 	local callbacks = M._callbacks
 	M._callbacks = {}
@@ -228,17 +237,21 @@ function pump()
 end
 
 --- Start running everything enqueued. Returns immediately; `on_done(summary)` fires when the queue drains.
-function M.run_all(on_done)
+--- `opts.quiet` hides the end-of-run toast when nothing failed.
+function M.run_all(on_done, opts)
+	local quiet = opts ~= nil and opts.quiet == true
 	if on_done then
 		table.insert(M._callbacks, on_done)
 	end
 	if M._started then
+		M._quiet = M._quiet and quiet
 		return
 	end
 	if not M.has_active() then
 		reset()
 	end
 	M._started = true
+	M._quiet = quiet
 	ui.emit("start", { total = #M._jobs })
 	vim.schedule(pump)
 end

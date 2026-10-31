@@ -7,7 +7,6 @@ local ui = require("sarcina.ui")
 local manifest = require("sarcina.manifest")
 local resolver = require("sarcina.resolver")
 local installer = require("sarcina.installer")
-local scheduler = require("sarcina.scheduler")
 
 --- User‑facing entry point.
 --- Call `require('sarcina').setup()` after adding Sarcina to your runtimepath.
@@ -22,11 +21,9 @@ function M.setup(opts)
 	-- 2️⃣ Resolve dependencies and order plugins
 	local resolved = resolver.resolve(specs)
 
-	-- 3️⃣ Queue every plugin's tasks (clone, rtp, config, ...) and run them in the background
-	-- 4️⃣ Register lazy‑load triggers (event/ft/cmd/keys) once the queue has drained
-	installer.install_all(resolved, function()
-		scheduler.schedule_all(resolved)
-	end)
+	-- 3️⃣ Queue every plugin's tasks and run them in the background. Lazy plugins register their
+	-- triggers and load later; the rest clone, join the runtimepath and run their config.
+	installer.install_all(resolved)
 end
 
 return M

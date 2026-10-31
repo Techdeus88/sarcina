@@ -4,7 +4,6 @@
 -- The runner in tasks.lua owns every status change, so executors never touch the UI state.
 
 local paths = require("sarcina.paths")
-local ui = require("sarcina.ui")
 
 local uv = vim.uv
 
@@ -106,64 +105,14 @@ function M.rtp(job, done)
 	done(true)
 end
 
--- Lazy‑load triggers (event/ft/cmd/keys)
+-- Hands the triggers to the scheduler; the deferred rtp/config/after tasks run when one fires.
 function M.trigger(job, done)
-	local trig = job.spec.triggers or {}
-	local aug = vim.api.nvim_create_augroup("SarcinaTrigger_" .. job.plugin, { clear = true })
-	if trig.event then
-		vim.api.nvim_create_autocmd(trig.event, {
-			group = aug,
-			pattern = "*",
-			callback = function()
-				ui.emit("info", string.format("Trigger %s for plugin %s fired", trig.event, job.plugin))
-			end,
-		})
-	end
-	if trig.ft then
-		vim.api.nvim_create_autocmd("FileType", {
-			group = aug,
-			pattern = trig.ft,
-			callback = function()
-				ui.emit("info", string.format("Filetype %s for plugin %s fired", trig.ft, job.plugin))
-			end,
-		})
-	end
-	if trig.cmd then
-		vim.api.nvim_create_user_command(trig.cmd, function()
-			ui.emit("info", string.format("Command %s for plugin %s fired", trig.cmd, job.plugin))
-		end, { nargs = "*" })
-	end
-	-- Keys support: trig.keys can be a table of mappings
-	if trig.keys then
-		for _, map in ipairs(trig.keys) do
-			local lhs, mode, desc, opts = nil, "n", nil, { noremap = true, silent = true }
-			if type(map) == "string" then
-				lhs = map
-			elseif type(map) == "table" then
-				lhs = map.lhs or map[1]
-				mode = map.mode or map[2] or "n"
-				desc = map.desc or map[3]
-				opts = map.opts or opts
-			end
-			if lhs then
-				local key_opts = vim.tbl_extend("force", opts, { desc = desc })
-				vim.api.nvim_set_keymap(
-					mode,
-					lhs,
-					string.format(
-						'<Cmd>lua require("sarcina.ui").emit("info", "Key %s for plugin %s fired")<CR>',
-						lhs,
-						job.plugin
-					),
-					key_opts
-				)
-			end
-		end
-	end
-	done(true)
+	local scheduler = require("sarcina.scheduler")
+	scheduler.register(job.plugin, job.spec)
+	done(true, "waiting for " .. scheduler.describe(job.spec.triggers))
 end
 
--- Runs `spec.fn`, or compiles `spec.script`; `spec.opts` is passed as the second argument.
+-- Calls `spec.fn`, or the compiled `spec.script`, as fn({ name, dir }, spec.opts).
 function M.lua(job, done)
 	local spec = job.spec
 	local fn = spec.fn
@@ -174,7 +123,8 @@ function M.lua(job, done)
 			return done(false, err)
 		end
 	end
-	local ok, err = pcall(fn, nil, spec.opts)
+	local plugin = { name = job.plugin, dir = paths.install(job.plugin, spec.opt) }
+	local ok, err = pcall(fn, plugin, spec.opts)
 	if ok then
 		done(true)
 	else

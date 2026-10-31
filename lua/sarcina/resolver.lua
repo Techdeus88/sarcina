@@ -110,6 +110,21 @@ function M.resolve(manifest)
 	-- -----------------------------------------------------------------
 	local task_factory = require("sarcina.task_factory")
 	for _, entry in ipairs(ordered) do
+		if entry.spec.triggers == nil then
+			entry.spec.triggers = task_factory.triggers(entry.spec)
+		end
+	end
+	-- An eager plugin needs its dependencies loaded up front, so they cannot wait on triggers.
+	for i = #ordered, 1, -1 do
+		local spec = ordered[i].spec
+		local deps = spec.deps or spec.dependencies
+		if not spec.triggers and type(deps) == "table" then
+			for _, dep in ipairs(deps) do
+				name_to_spec[dep].triggers = false -- false, not nil, so generate() keeps it eager
+			end
+		end
+	end
+	for _, entry in ipairs(ordered) do
 		local spec = entry.spec
 		if not spec.tasks then
 			spec.tasks = task_factory.generate(spec)

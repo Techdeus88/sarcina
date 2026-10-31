@@ -87,7 +87,9 @@ function M._on_done(summary)
 	if summary.skipped > 0 then
 		text = text .. string.format(", %d skipped", summary.skipped)
 	end
-	M.emit(summary.failed > 0 and "error" or "info", text)
+	if summary.failed > 0 or not summary.quiet then
+		M.emit(summary.failed > 0 and "error" or "info", text)
+	end
 	if summary.failed == 0 then
 		vim.defer_fn(function()
 			if not require("sarcina.tasks").has_active() then
