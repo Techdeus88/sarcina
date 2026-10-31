@@ -4,8 +4,8 @@
 
 local M = {}
 
-local ui = require("sarcina.ui")
-local executors = require("sarcina.executors")
+local ui = require('sarcina.ui')
+local executors = require('sarcina.executors')
 
 local uv = vim.uv
 
@@ -21,246 +21,208 @@ M._callbacks = {}
 
 local run_job, pump
 
-local function emit(job)
-	ui.emit("task", job)
-end
+local function emit(job) ui.emit('task', job) end
 
 local function reset()
-	M._jobs, M._plugins, M._order, M._running = {}, {}, {}, 0
+    M._jobs, M._plugins, M._order, M._running = {}, {}, {}, 0
 end
 
 function M.has_active()
-	for _, job in ipairs(M._jobs) do
-		if job.status == "pending" or job.status == "running" then
-			return true
-		end
-	end
-	return false
+    for _, job in ipairs(M._jobs) do
+        if job.status == 'pending' or job.status == 'running' then return true end
+    end
+    return false
 end
 
 function M.snapshot()
-	local counts = { pending = 0, running = 0, done = 0, failed = 0, skipped = 0 }
-	for _, job in ipairs(M._jobs) do
-		counts[job.status] = counts[job.status] + 1
-	end
-	return { jobs = M._jobs, counts = counts, total = #M._jobs }
+    local counts = { pending = 0, running = 0, done = 0, failed = 0, skipped = 0 }
+    for _, job in ipairs(M._jobs) do
+        counts[job.status] = counts[job.status] + 1
+    end
+    return { jobs = M._jobs, counts = counts, total = #M._jobs }
 end
 
 function M.plugin_failed(name)
-	local plugin = M._plugins[name]
-	return plugin ~= nil and plugin.failed == true
+    local plugin = M._plugins[name]
+    return plugin ~= nil and plugin.failed == true
 end
 
 -- Evaluate a `when` Lua expression safely; returns true if missing.
 local function condition_ok(task)
-	if not task.when then
-		return true
-	end
-	local fn = loadstring("return " .. task.when)
-	if not fn then
-		return false
-	end
-	local ok, res = pcall(fn)
-	return ok and res and true or false
+    if not task.when then return true end
+    local fn = loadstring('return ' .. task.when)
+    if not fn then return false end
+    local ok, res = pcall(fn)
+    return ok and res and true or false
 end
 
 -- Enqueue all tasks for a given plugin spec (if conditions pass).
 function M.enqueue(plugin_name, plugin_spec)
-	if not M.has_active() then
-		reset()
-	end
-	local plugin = M._plugins[plugin_name]
-	if not plugin then
-		local deps = plugin_spec.deps or plugin_spec.dependencies
-		plugin = { name = plugin_name, deps = type(deps) == "table" and deps or {}, jobs = {}, next = 1 }
-		M._plugins[plugin_name] = plugin
-		table.insert(M._order, plugin_name)
-	end
-	for _, task in ipairs(plugin_spec.tasks or {}) do
-		if condition_ok(task) then
-			local job = {
-				plugin = plugin_name,
-				id = task.id,
-				type = task.type,
-				spec = task,
-				status = "pending",
-				attempts = 0,
-			}
-			table.insert(plugin.jobs, job)
-			table.insert(M._jobs, job)
-			emit(job)
-		end
-	end
+    if not M.has_active() then reset() end
+    local plugin = M._plugins[plugin_name]
+    if not plugin then
+        local deps = plugin_spec.deps or plugin_spec.dependencies
+        plugin = { name = plugin_name, deps = type(deps) == 'table' and deps or {}, jobs = {}, next = 1 }
+        M._plugins[plugin_name] = plugin
+        table.insert(M._order, plugin_name)
+    end
+    for _, task in ipairs(plugin_spec.tasks or {}) do
+        if condition_ok(task) then
+            local job = {
+                plugin = plugin_name,
+                id = task.id,
+                type = task.type,
+                spec = task,
+                status = 'pending',
+                attempts = 0,
+            }
+            table.insert(plugin.jobs, job)
+            table.insert(M._jobs, job)
+            emit(job)
+        end
+    end
 end
 
 local function skip_rest(plugin, reason)
-	for i = plugin.next, #plugin.jobs do
-		local job = plugin.jobs[i]
-		job.status = "skipped"
-		job.note = reason
-		emit(job)
-	end
-	plugin.next = #plugin.jobs + 1
-	plugin.failed = true
+    for i = plugin.next, #plugin.jobs do
+        local job = plugin.jobs[i]
+        job.status = 'skipped'
+        job.note = reason
+        emit(job)
+    end
+    plugin.next = #plugin.jobs + 1
+    plugin.failed = true
 end
 
 local function dependency_state(plugin)
-	for _, dep_name in ipairs(plugin.deps) do
-		local dep = M._plugins[dep_name]
-		if dep then
-			if dep.failed then
-				return "failed", dep_name
-			end
-			if dep.running or dep.next <= #dep.jobs then
-				return "waiting"
-			end
-		end
-	end
-	return "ready"
+    for _, dep_name in ipairs(plugin.deps) do
+        local dep = M._plugins[dep_name]
+        if dep then
+            if dep.failed then return 'failed', dep_name end
+            if dep.running or dep.next <= #dep.jobs then return 'waiting' end
+        end
+    end
+    return 'ready'
 end
 
 local function settle()
-	if M._running > 0 then
-		return
-	end
-	for _, name in ipairs(M._order) do
-		local plugin = M._plugins[name]
-		if plugin.next <= #plugin.jobs then
-			skip_rest(plugin, "dependencies never completed")
-			return pump()
-		end
-	end
-	M._started = false
-	local counts = M.snapshot().counts
-	local summary = { total = #M._jobs, done = counts.done, failed = counts.failed, skipped = counts.skipped }
-	if M._quiet then
-		summary.quiet = true
-	end
-	ui.emit("done", summary)
-	local callbacks = M._callbacks
-	M._callbacks = {}
-	for _, cb in ipairs(callbacks) do
-		local ok, err = pcall(cb, summary)
-		if not ok then
-			ui.emit("error", "Task completion callback failed: " .. tostring(err))
-		end
-	end
+    if M._running > 0 then return end
+    for _, name in ipairs(M._order) do
+        local plugin = M._plugins[name]
+        if plugin.next <= #plugin.jobs then
+            skip_rest(plugin, 'dependencies never completed')
+            return pump()
+        end
+    end
+    M._started = false
+    local counts = M.snapshot().counts
+    local summary = { total = #M._jobs, done = counts.done, failed = counts.failed, skipped = counts.skipped }
+    if M._quiet then summary.quiet = true end
+    ui.emit('done', summary)
+    local callbacks = M._callbacks
+    M._callbacks = {}
+    for _, cb in ipairs(callbacks) do
+        local ok, err = pcall(cb, summary)
+        if not ok then ui.emit('error', 'Task completion callback failed: ' .. tostring(err)) end
+    end
 end
 
 local function finish(plugin, job, ok, msg)
-	job.duration = (uv.hrtime() - job.started) / 1e6
-	if ok then
-		job.status = "done"
-		job.note = type(msg) == "string" and msg or nil
-		job.error = nil
-		emit(job)
-	else
-		job.error = tostring(msg or "unknown error")
-		if job.attempts <= (job.spec.retries or 0) then
-			return run_job(plugin, job)
-		end
-		job.status = "failed"
-		emit(job)
-		skip_rest(plugin, job.id .. " failed")
-	end
-	plugin.running = false
-	M._running = M._running - 1
-	pump()
+    job.duration = (uv.hrtime() - job.started) / 1e6
+    if ok then
+        job.status = 'done'
+        job.note = type(msg) == 'string' and msg or nil
+        job.error = nil
+        emit(job)
+    else
+        job.error = tostring(msg or 'unknown error')
+        if job.attempts <= (job.spec.retries or 0) then return run_job(plugin, job) end
+        job.status = 'failed'
+        emit(job)
+        skip_rest(plugin, job.id .. ' failed')
+    end
+    plugin.running = false
+    M._running = M._running - 1
+    pump()
 end
 
 function run_job(plugin, job)
-	job.attempts = job.attempts + 1
-	job.status = "running"
-	job.error = nil
-	job.output = nil
-	job.started = job.started or uv.hrtime()
-	emit(job)
+    job.attempts = job.attempts + 1
+    job.status = 'running'
+    job.error = nil
+    job.output = nil
+    job.started = job.started or uv.hrtime()
+    emit(job)
 
-	local settled = false
-	local function done(ok, msg)
-		if settled then
-			return
-		end
-		settled = true
-		vim.schedule(function()
-			finish(plugin, job, ok, msg)
-		end)
-	end
-	local function report(line)
-		vim.schedule(function()
-			if job.status == "running" then
-				job.output = line
-				emit(job)
-			end
-		end)
-	end
+    local settled = false
+    local function done(ok, msg)
+        if settled then return end
+        settled = true
+        vim.schedule(function() finish(plugin, job, ok, msg) end)
+    end
+    local function report(line)
+        vim.schedule(function()
+            if job.status == 'running' then
+                job.output = line
+                emit(job)
+            end
+        end)
+    end
 
-	local exec = executors[job.type]
-	if not exec then
-		return done(false, "unknown task type " .. tostring(job.type))
-	end
-	local ok, err = pcall(exec, job, done, report)
-	if not ok then
-		done(false, err)
-	end
+    local exec = executors[job.type]
+    if not exec then return done(false, 'unknown task type ' .. tostring(job.type)) end
+    local ok, err = pcall(exec, job, done, report)
+    if not ok then done(false, err) end
 end
 
 local function start(plugin)
-	local job = plugin.jobs[plugin.next]
-	plugin.next = plugin.next + 1
-	plugin.running = true
-	M._running = M._running + 1
-	run_job(plugin, job)
+    local job = plugin.jobs[plugin.next]
+    plugin.next = plugin.next + 1
+    plugin.running = true
+    M._running = M._running + 1
+    run_job(plugin, job)
 end
 
 function pump()
-	if not M._started then
-		return
-	end
-	local skipped
-	repeat
-		skipped = false
-		for _, name in ipairs(M._order) do
-			local plugin = M._plugins[name]
-			if not plugin.running and plugin.next <= #plugin.jobs then
-				local state, dep = dependency_state(plugin)
-				if state == "failed" then
-					skip_rest(plugin, "dependency " .. dep .. " failed")
-					skipped = true
-				elseif state == "ready" and M._running < M.max_concurrent then
-					start(plugin)
-				end
-			end
-		end
-	until not skipped
-	settle()
+    if not M._started then return end
+    local skipped
+    repeat
+        skipped = false
+        for _, name in ipairs(M._order) do
+            local plugin = M._plugins[name]
+            if not plugin.running and plugin.next <= #plugin.jobs then
+                local state, dep = dependency_state(plugin)
+                if state == 'failed' then
+                    skip_rest(plugin, 'dependency ' .. dep .. ' failed')
+                    skipped = true
+                elseif state == 'ready' and M._running < M.max_concurrent then
+                    start(plugin)
+                end
+            end
+        end
+    until not skipped
+    settle()
 end
 
 --- Start running everything enqueued. Returns immediately; `on_done(summary)` fires when the queue drains.
 --- `opts.quiet` hides the end-of-run toast when nothing failed.
 function M.run_all(on_done, opts)
-	local quiet = opts ~= nil and opts.quiet == true
-	if on_done then
-		table.insert(M._callbacks, on_done)
-	end
-	if M._started then
-		M._quiet = M._quiet and quiet
-		return
-	end
-	if not M.has_active() then
-		reset()
-	end
-	M._started = true
-	M._quiet = quiet
-	ui.emit("start", { total = #M._jobs })
-	vim.schedule(pump)
+    local quiet = opts ~= nil and opts.quiet == true
+    if on_done then table.insert(M._callbacks, on_done) end
+    if M._started then
+        M._quiet = M._quiet and quiet
+        return
+    end
+    if not M.has_active() then reset() end
+    M._started = true
+    M._quiet = quiet
+    ui.emit('start', { total = #M._jobs })
+    vim.schedule(pump)
 end
 
 --- Block (while still pumping the event loop) until the queue drains. Returns false on timeout.
 function M.wait(timeout)
-	return vim.wait(timeout or 60000, function()
-		return not M._started and not M.has_active()
-	end, 5)
+    return vim.wait(timeout or 60000, function() return not M._started and not M.has_active() end, 5)
 end
 
 return M

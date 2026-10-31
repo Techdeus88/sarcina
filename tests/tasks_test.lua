@@ -1,224 +1,198 @@
-local h = require("helpers")
-local tasks = require("sarcina.tasks")
-local executors = require("sarcina.executors")
-local ui = require("sarcina.ui")
+local h = require('helpers')
+local tasks = require('sarcina.tasks')
+local executors = require('sarcina.executors')
+local ui = require('sarcina.ui')
 
 local tests = {}
-local function test(name, fn)
-	table.insert(tests, { name, fn })
-end
+local function test(name, fn) table.insert(tests, { name, fn }) end
 
 executors.t_twice = function(_, done)
-	done(true)
-	done(false, "late")
+    done(true)
+    done(false, 'late')
 end
-executors.t_throws = function()
-	error("kaput")
-end
+executors.t_throws = function() error('kaput') end
 executors.t_sleep = function(_, done)
-	vim.defer_fn(function()
-		done(true)
-	end, 20)
+    vim.defer_fn(function() done(true) end, 20)
 end
 
-test("run_all returns before any task has run", function()
-	local ran = false
-	tasks.enqueue("p", {
-		tasks = {
-			h.lua("a", function()
-				ran = true
-			end),
-		},
-	})
-	tasks.run_all()
-	h.eq(ran, false)
-	h.ok(tasks.wait(2000))
-	h.eq(ran, true)
+test('run_all returns before any task has run', function()
+    local ran = false
+    tasks.enqueue('p', {
+        tasks = {
+            h.lua('a', function() ran = true end),
+        },
+    })
+    tasks.run_all()
+    h.eq(ran, false)
+    h.ok(tasks.wait(2000))
+    h.eq(ran, true)
 end)
 
-test("each job reports pending, running, then done", function()
-	local seen = {}
-	ui.on("task", function(job)
-		table.insert(seen, job.id .. ":" .. job.status)
-	end)
-	h.run({ { name = "p", tasks = { h.lua("a", h.noop), h.lua("b", h.noop) } } })
-	h.eq(seen, { "a:pending", "b:pending", "a:running", "a:done", "b:running", "b:done" })
+test('each job reports pending, running, then done', function()
+    local seen = {}
+    ui.on('task', function(job) table.insert(seen, job.id .. ':' .. job.status) end)
+    h.run({ { name = 'p', tasks = { h.lua('a', h.noop), h.lua('b', h.noop) } } })
+    h.eq(seen, { 'a:pending', 'b:pending', 'a:running', 'a:done', 'b:running', 'b:done' })
 end)
 
-test("snapshot keeps enqueue order", function()
-	h.run({
-		{ name = "z", tasks = { h.lua("one", h.noop), h.lua("two", h.noop) } },
-		{ name = "a", tasks = { h.lua("three", h.noop) } },
-	})
-	local jobs = vim.tbl_map(function(job)
-		return job.plugin .. "/" .. job.id
-	end, tasks.snapshot().jobs)
-	h.eq(jobs, { "z/one", "z/two", "a/three" })
+test('snapshot keeps enqueue order', function()
+    h.run({
+        { name = 'z', tasks = { h.lua('one', h.noop), h.lua('two', h.noop) } },
+        { name = 'a', tasks = { h.lua('three', h.noop) } },
+    })
+    local jobs = vim.tbl_map(function(job) return job.plugin .. '/' .. job.id end, tasks.snapshot().jobs)
+    h.eq(jobs, { 'z/one', 'z/two', 'a/three' })
 end)
 
-test("a failed job skips the rest of its plugin and nothing else", function()
-	local summary = h.run({
-		{
-			name = "bad",
-			tasks = {
-				h.lua("x", function()
-					error("boom")
-				end),
-				h.lua("y", h.noop),
-			},
-		},
-		{ name = "good", tasks = { h.lua("z", h.noop) } },
-	})
-	h.eq(h.job("bad", "x").status, "failed")
-	h.ok(h.job("bad", "x").error:find("boom", 1, true))
-	h.eq(h.job("bad", "y").status, "skipped")
-	h.eq(h.job("good", "z").status, "done")
-	h.eq(summary, { total = 3, done = 1, failed = 1, skipped = 1 })
+test('a failed job skips the rest of its plugin and nothing else', function()
+    local summary = h.run({
+        {
+            name = 'bad',
+            tasks = {
+                h.lua('x', function() error('boom') end),
+                h.lua('y', h.noop),
+            },
+        },
+        { name = 'good', tasks = { h.lua('z', h.noop) } },
+    })
+    h.eq(h.job('bad', 'x').status, 'failed')
+    h.ok(h.job('bad', 'x').error:find('boom', 1, true))
+    h.eq(h.job('bad', 'y').status, 'skipped')
+    h.eq(h.job('good', 'z').status, 'done')
+    h.eq(summary, { total = 3, done = 1, failed = 1, skipped = 1 })
 end)
 
-test("dependents wait for their dependencies, whatever the enqueue order", function()
-	local order = {}
-	local function mark(name)
-		return function()
-			table.insert(order, name)
-		end
-	end
-	h.run({
-		{ name = "app", deps = { "lib" }, tasks = { h.lua("a", mark("app")) } },
-		{ name = "lib", tasks = { h.lua("l", mark("lib")) } },
-	})
-	h.eq(order, { "lib", "app" })
+test('dependents wait for their dependencies, whatever the enqueue order', function()
+    local order = {}
+    local function mark(name)
+        return function() table.insert(order, name) end
+    end
+    h.run({
+        { name = 'app', deps = { 'lib' }, tasks = { h.lua('a', mark('app')) } },
+        { name = 'lib', tasks = { h.lua('l', mark('lib')) } },
+    })
+    h.eq(order, { 'lib', 'app' })
 end)
 
-test("a failed dependency skips its dependents", function()
-	h.run({
-		{ name = "app", deps = { "lib" }, tasks = { h.lua("a", h.noop) } },
-		{
-			name = "lib",
-			tasks = {
-				h.lua("l", function()
-					error("no")
-				end),
-			},
-		},
-	})
-	h.eq(h.job("app", "a").status, "skipped")
-	h.eq(h.job("app", "a").note, "dependency lib failed")
+test('a failed dependency skips its dependents', function()
+    h.run({
+        { name = 'app', deps = { 'lib' }, tasks = { h.lua('a', h.noop) } },
+        {
+            name = 'lib',
+            tasks = {
+                h.lua('l', function() error('no') end),
+            },
+        },
+    })
+    h.eq(h.job('app', 'a').status, 'skipped')
+    h.eq(h.job('app', 'a').note, 'dependency lib failed')
 end)
 
-test("retries a failing job", function()
-	local calls = 0
-	h.run({
-		{
-			name = "p",
-			tasks = {
-				h.lua("flaky", function()
-					calls = calls + 1
-					if calls < 3 then
-						error("nope")
-					end
-				end, { retries = 2 }),
-			},
-		},
-	})
-	h.eq(calls, 3)
-	h.eq(h.job("p", "flaky").status, "done")
-	h.eq(h.job("p", "flaky").attempts, 3)
+test('retries a failing job', function()
+    local calls = 0
+    h.run({
+        {
+            name = 'p',
+            tasks = {
+                h.lua('flaky', function()
+                    calls = calls + 1
+                    if calls < 3 then error('nope') end
+                end, { retries = 2 }),
+            },
+        },
+    })
+    h.eq(calls, 3)
+    h.eq(h.job('p', 'flaky').status, 'done')
+    h.eq(h.job('p', 'flaky').attempts, 3)
 end)
 
-test("gives up once retries run out", function()
-	h.run({
-		{
-			name = "p",
-			tasks = {
-				h.lua("always", function()
-					error("nope")
-				end, { retries = 1 }),
-			},
-		},
-	})
-	h.eq(h.job("p", "always").status, "failed")
-	h.eq(h.job("p", "always").attempts, 2)
+test('gives up once retries run out', function()
+    h.run({
+        {
+            name = 'p',
+            tasks = {
+                h.lua('always', function() error('nope') end, { retries = 1 }),
+            },
+        },
+    })
+    h.eq(h.job('p', 'always').status, 'failed')
+    h.eq(h.job('p', 'always').attempts, 2)
 end)
 
-test("an unknown task type fails visibly", function()
-	h.run({ { name = "p", tasks = { { id = "x", type = "nope" } } } })
-	h.eq(h.job("p", "x").status, "failed")
-	h.ok(h.job("p", "x").error:find("unknown task type nope", 1, true))
+test('an unknown task type fails visibly', function()
+    h.run({ { name = 'p', tasks = { { id = 'x', type = 'nope' } } } })
+    h.eq(h.job('p', 'x').status, 'failed')
+    h.ok(h.job('p', 'x').error:find('unknown task type nope', 1, true))
 end)
 
-test("drops tasks whose `when` is false or invalid", function()
-	tasks.enqueue("p", {
-		tasks = {
-			h.lua("no", h.noop, { when = "false" }),
-			h.lua("yes", h.noop, { when = "1 == 1" }),
-			h.lua("bad", h.noop, { when = "((" }),
-		},
-	})
-	h.eq(h.ids(tasks.snapshot().jobs), { "yes" })
-	tasks.run_all()
-	tasks.wait(2000)
+test('drops tasks whose `when` is false or invalid', function()
+    tasks.enqueue('p', {
+        tasks = {
+            h.lua('no', h.noop, { when = 'false' }),
+            h.lua('yes', h.noop, { when = '1 == 1' }),
+            h.lua('bad', h.noop, { when = '((' }),
+        },
+    })
+    h.eq(h.ids(tasks.snapshot().jobs), { 'yes' })
+    tasks.run_all()
+    tasks.wait(2000)
 end)
 
-test("ignores a second done and survives a throwing executor", function()
-	h.run({ { name = "p", tasks = { { id = "a", type = "t_twice" } } } })
-	h.eq(h.job("p", "a").status, "done")
-	h.run({ { name = "q", tasks = { { id = "b", type = "t_throws" } } } })
-	h.eq(h.job("q", "b").status, "failed")
-	h.ok(h.job("q", "b").error:find("kaput", 1, true))
+test('ignores a second done and survives a throwing executor', function()
+    h.run({ { name = 'p', tasks = { { id = 'a', type = 't_twice' } } } })
+    h.eq(h.job('p', 'a').status, 'done')
+    h.run({ { name = 'q', tasks = { { id = 'b', type = 't_throws' } } } })
+    h.eq(h.job('q', 'b').status, 'failed')
+    h.ok(h.job('q', 'b').error:find('kaput', 1, true))
 end)
 
-test("never runs more plugins at once than max_concurrent", function()
-	local running, peak = 0, 0
-	executors.t_count = function(_, done)
-		running = running + 1
-		peak = math.max(peak, running)
-		vim.defer_fn(function()
-			running = running - 1
-			done(true)
-		end, 20)
-	end
-	tasks.max_concurrent = 2
-	local plugins = {}
-	for i = 1, 6 do
-		table.insert(plugins, { name = "p" .. i, tasks = { { id = "s", type = "t_count" } } })
-	end
-	h.run(plugins)
-	h.eq(peak, 2)
+test('never runs more plugins at once than max_concurrent', function()
+    local running, peak = 0, 0
+    executors.t_count = function(_, done)
+        running = running + 1
+        peak = math.max(peak, running)
+        vim.defer_fn(function()
+            running = running - 1
+            done(true)
+        end, 20)
+    end
+    tasks.max_concurrent = 2
+    local plugins = {}
+    for i = 1, 6 do
+        table.insert(plugins, { name = 'p' .. i, tasks = { { id = 's', type = 't_count' } } })
+    end
+    h.run(plugins)
+    h.eq(peak, 2)
 end)
 
-test("runs different plugins in parallel", function()
-	local running, peak = 0, 0
-	executors.t_par = function(_, done)
-		running = running + 1
-		peak = math.max(peak, running)
-		vim.defer_fn(function()
-			running = running - 1
-			done(true)
-		end, 30)
-	end
-	h.run({
-		{ name = "a", tasks = { { id = "s", type = "t_par" } } },
-		{ name = "b", tasks = { { id = "s", type = "t_par" } } },
-	})
-	h.eq(peak, 2)
+test('runs different plugins in parallel', function()
+    local running, peak = 0, 0
+    executors.t_par = function(_, done)
+        running = running + 1
+        peak = math.max(peak, running)
+        vim.defer_fn(function()
+            running = running - 1
+            done(true)
+        end, 30)
+    end
+    h.run({
+        { name = 'a', tasks = { { id = 's', type = 't_par' } } },
+        { name = 'b', tasks = { { id = 's', type = 't_par' } } },
+    })
+    h.eq(peak, 2)
 end)
 
-test("calls back with a summary, even for an empty queue", function()
-	local got
-	tasks.run_all(function(summary)
-		got = summary
-	end)
-	h.ok(vim.wait(1000, function()
-		return got ~= nil
-	end))
-	h.eq(got, { total = 0, done = 0, failed = 0, skipped = 0 })
+test('calls back with a summary, even for an empty queue', function()
+    local got
+    tasks.run_all(function(summary) got = summary end)
+    h.ok(vim.wait(1000, function() return got ~= nil end))
+    h.eq(got, { total = 0, done = 0, failed = 0, skipped = 0 })
 end)
 
-test("a second run starts from a clean slate", function()
-	h.run({ { name = "p", tasks = { h.lua("old", h.noop) } } })
-	h.run({ { name = "p", tasks = { h.lua("new", h.noop) } } })
-	h.eq(h.ids(tasks.snapshot().jobs), { "new" })
+test('a second run starts from a clean slate', function()
+    h.run({ { name = 'p', tasks = { h.lua('old', h.noop) } } })
+    h.run({ { name = 'p', tasks = { h.lua('new', h.noop) } } })
+    h.eq(h.ids(tasks.snapshot().jobs), { 'new' })
 end)
 
 return tests
