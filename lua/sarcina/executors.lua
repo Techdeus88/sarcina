@@ -82,6 +82,13 @@ function M.make(job, done, report)
     run_cmd({ 'make' }, { cwd = cwd }, report, done)
 end
 
+-- Runs `spec.cmd` through the shell, in the plugin directory unless `spec.cwd` says otherwise.
+function M.shell(job, done, report)
+    local cwd = job.spec.cwd or paths.install(job.plugin)
+    local shell = vim.fn.has('win32') == 1 and { 'cmd.exe', '/c' } or { 'sh', '-c' }
+    run_cmd(vim.list_extend(shell, { job.spec.cmd }), { cwd = cwd }, report, done)
+end
+
 -- Returns false and why when the plugin directory is missing.
 local function add_to_rtp(name)
     local path = paths.install(name)
@@ -113,6 +120,14 @@ function M.cmd(job, done)
     done(ok, err)
 end
 
+-- Defines the mappings of the `keys` entries that have an rhs.
+function M.keymaps(job, done)
+    for _, map in ipairs(job.spec.keys) do
+        require('sarcina.keys').set(map)
+    end
+    done(true)
+end
+
 -- Hands the triggers to the scheduler; the deferred rtp/config/after tasks run when one fires.
 function M.trigger(job, done)
     local scheduler = require('sarcina.scheduler')
@@ -120,7 +135,16 @@ function M.trigger(job, done)
     done(true, 'waiting for ' .. scheduler.describe(job.spec.triggers))
 end
 
--- Calls `spec.fn`, or the compiled `spec.script`, as fn({ name, dir }, spec.opts).
+-- `opts` may be a function(plugin, opts): it returns the table, or fills in the empty one it is given.
+local function resolve_opts(opts, plugin)
+    if type(opts) ~= 'function' then return opts end
+    local given = {}
+    local returned = opts(plugin, given)
+    if returned == nil then return given end
+    return returned
+end
+
+-- Calls `spec.fn`, or the compiled `spec.script`, as fn({ name, dir }, opts).
 function M.lua(job, done)
     local spec = job.spec
     local fn = spec.fn
@@ -130,7 +154,7 @@ function M.lua(job, done)
         if not fn then return done(false, err) end
     end
     local plugin = { name = job.plugin, dir = paths.install(job.plugin) }
-    local ok, err = pcall(fn, plugin, spec.opts)
+    local ok, err = pcall(function() fn(plugin, resolve_opts(spec.opts, plugin)) end)
     if ok then
         done(true)
     else
@@ -165,12 +189,14 @@ local function write_record(path, commit)
     file:close()
 end
 
-local function per_commit(exec)
+-- `needs_plugin` puts the plugin on the runtimepath first, for code that calls into it.
+local function per_commit(exec, needs_plugin)
     return function(job, done, report)
         if not job.spec.per_commit then return exec(job, done, report) end
         local record = paths.install(job.plugin) .. '/.git/sarcina-' .. job.id
         head_commit(job.plugin, function(commit)
             if commit and read_record(record) == commit then return done(true, 'up to date') end
+            if needs_plugin then add_to_rtp(job.plugin) end
             exec(job, function(ok, msg)
                 if ok and commit then write_record(record, commit) end
                 done(ok, msg)
@@ -179,8 +205,9 @@ local function per_commit(exec)
     end
 end
 
-for _, kind in ipairs({ 'lua', 'cmd', 'make' }) do
-    M[kind] = per_commit(M[kind])
-end
+M.lua = per_commit(M.lua, true)
+M.cmd = per_commit(M.cmd)
+M.shell = per_commit(M.shell)
+M.make = per_commit(M.make)
 
 return M

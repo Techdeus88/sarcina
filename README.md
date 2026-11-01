@@ -13,8 +13,9 @@ lua/sarcina/
 ├── task_factory.lua  turns spec fields (build, config, opts, event, ...) into tasks
 ├── main_module.lua   finds the module that a plugin's opts belong to
 ├── tasks.lua         task store and async runner; owns all task state
-├── executors.lua     one function per task type (git_clone, rtp, lua, trigger, make)
+├── executors.lua     one function per task type (git_clone, rtp, lua, cmd, shell, keymaps, trigger, make)
 ├── scheduler.lua     lazy-load stubs, deferred loading, trigger replay
+├── keys.lua          parses `keys` entries into a lhs, an rhs, a mode and options
 ├── installer.lua     queues a resolved manifest and runs it
 ├── paths.lua         install and staging locations
 ├── schema.lua        manifest and task validation
@@ -48,18 +49,18 @@ return {
 | `repo`, or the first entry | what to clone |
 | `name` | plugin name; derived from the repo when missing |
 | `deps` | plugins that must finish first |
-| `init`, `build`, `after` | Lua string or function run before install, after install, and after load. A string starting with `:` runs as an Ex command instead, such as `build = ':TSUpdate'`. `build` runs only after a fresh clone or when the plugin's commit changes |
+| `init`, `build`, `after` | run before install, after install, and after load. A function is called with `plugin = { name, dir }`. A string is a Lua chunk, except that a `build` string is a shell command run in the plugin directory (`build = 'make'`), and any string starting with `:` is an Ex command (`build = ':TSUpdate'`). `build` runs only after a fresh clone or when the plugin's commit changes |
 | `config` | called as `config(plugin, opts)` with `plugin = { name, dir }` |
-| `opts` | handed to `require(module).setup(opts)` when there is no `config` |
+| `opts` | a table, or a `function(plugin, opts)` that returns one or fills in the empty table it is given. Handed to `config(plugin, opts)`, or to `require(module).setup(opts)` when there is no `config` |
 | `main` | the module to require; found from the plugin name when missing |
-| `event`, `ft`, `cmd`, `keys` | lazy-load triggers |
+| `event`, `ft`, `cmd`, `keys` | lazy-load triggers. A `keys` entry is `'lhs'` or `{ lhs, rhs, mode = 'n', desc = ..., <keymap options> }`; with an `rhs`, sarcina defines the mapping when the plugin loads |
 | `tasks` | an explicit task list, which skips the generated one |
 
 Every plugin, lazy or not, is cloned to `stdpath('data')/sarcina/plugins/<name>`. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs, which is after `VimEnter` unless your config calls `require('sarcina.tasks').wait()`.
 
 A `build` that succeeds records the plugin's commit in `.git/sarcina-build` inside the plugin directory, and later runs skip it while `HEAD` still matches (`build` shows `up to date`). A new commit from an update or a manual `git pull` runs it again. A build that fails leaves no record, so it runs again on the next launch. To force a rebuild, delete that file.
 
-An Ex command hook adds the plugin to `runtimepath` first, because the command usually comes from the plugin's own `plugin/` files. Sarcina sources those files only after `VimEnter`, so such a hook cannot find its command if you call `tasks.wait()` from `init.lua`.
+A function or Ex command `build` finds the plugin on `runtimepath`, so it can call the plugin's autoload functions and commands. An Ex command hook of any kind does the same, because the command usually comes from the plugin's own `plugin/` files. Sarcina sources those files only after `VimEnter`, so such a hook cannot find its command if you call `tasks.wait()` from `init.lua`.
 
 Without `main`, sarcina matches the plugin name, then the repo name, against the modules in the plugin's `lua/` directory, ignoring case, punctuation and `nvim` affixes. A lone module wins by default. If it cannot tell, the load task fails with the list of modules and asks you to set `main`.
 

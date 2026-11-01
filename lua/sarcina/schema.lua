@@ -39,7 +39,7 @@ local OPTIONAL_FIELDS = {
     { key = 'build', type = { 'string', 'function' } },
     { key = 'config', type = { 'string', 'function' } },
     { key = 'after', type = { 'string', 'function' } },
-    { key = 'opts', type = 'table' },
+    { key = 'opts', type = { 'table', 'function' } },
     { key = 'main', type = 'string' },
 }
 
@@ -123,6 +123,8 @@ local TASK_SPEC = {
     git_clone = { required = { 'repo' } },
     lua = { required = {} }, -- needs `script` or `fn`, checked below
     cmd = { required = { 'cmd' } },
+    shell = { required = { 'cmd' } },
+    keymaps = { required = { 'keys' } },
     rtp = { required = {} },
     trigger = { required = { 'triggers' } },
     make = { required = {} },
@@ -165,11 +167,14 @@ function M.validate_task(task)
     if task.fn and not is_function(task.fn) then
         return fail(string.format('Task %s: `fn` must be a function.', task.id))
     end
+    if task.keys and not is_table(task.keys) then
+        return fail(string.format('Task %s: `keys` must be a table.', task.id))
+    end
     if task.triggers and not is_table(task.triggers) then
         return fail(string.format('Task %s: `triggers` must be a table.', task.id))
     end
-    if task.opts and not is_table(task.opts) then
-        return fail(string.format('Task %s: `opts` must be a table.', task.id))
+    if task.opts and not (is_table(task.opts) or is_function(task.opts)) then
+        return fail(string.format('Task %s: `opts` must be a table or a function.', task.id))
     end
 
     -- All good

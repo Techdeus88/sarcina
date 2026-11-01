@@ -42,8 +42,9 @@ test('a lazy plugin defers rtp, load and after into the trigger task', function(
 end)
 
 test('triggers are normalized to lists', function()
-    local triggers = factory.triggers({ event = 'BufRead', cmd = 'Foo', keys = { '<F5>', { '<F6>', 'n' } } })
-    h.eq(triggers, { event = { 'BufRead' }, cmd = { 'Foo' }, keys = { '<F5>', { '<F6>', 'n' } } })
+    local triggers =
+        factory.triggers({ event = 'BufRead', cmd = 'Foo', keys = { '<F5>', { '<F6>', mode = 'v' } } })
+    h.eq(triggers, { event = { 'BufRead' }, cmd = { 'Foo' }, keys = { '<F5>', { '<F6>', mode = 'v' } } })
     h.eq(factory.triggers({ repo = 'x/y' }), nil)
 end)
 
@@ -69,8 +70,32 @@ end)
 
 test(
     'keeps string values as scripts',
-    function() h.eq(find(factory.generate({ repo = 'x/y', build = 'return 1' }), 'build').script, 'return 1') end
+    function() h.eq(find(factory.generate({ repo = 'x/y', after = 'return 1' }), 'after').script, 'return 1') end
 )
+
+test('a string build is a shell command that runs per commit', function()
+    local build = find(factory.generate({ repo = 'x/y', build = 'make tiktoken' }), 'build')
+    h.eq(build, { id = 'build', type = 'shell', cmd = 'make tiktoken', per_commit = true })
+end)
+
+test('keys with an rhs add a keymaps task after load, and keys without one add nothing', function()
+    local mapped = { '<leader>uc', '<cmd>CodeDiff<cr>', desc = 'Toggle CodeDiff' }
+    local tasks = factory.generate({ repo = 'x/y', config = h.noop, keys = { 'gd', mapped } })
+    local trigger = find(tasks, 'load_trigger')
+    h.eq(h.ids(trigger.deferred), { 'rtp', 'load', 'keys' })
+    h.eq(find(trigger.deferred, 'keys'), { id = 'keys', type = 'keymaps', keys = { mapped } })
+    h.eq(h.ids(find(factory.generate({ repo = 'x/y', keys = { 'gd' } }), 'load_trigger').deferred), { 'rtp' })
+end)
+
+test('a plugin forced eager still defines the mappings of its keys', function()
+    local tasks = factory.generate({ repo = 'x/y', triggers = false, keys = { { 'a', '<cmd>Foo<cr>' } } })
+    h.eq(h.ids(tasks), { 'install', 'rtp', 'keys' })
+end)
+
+test('opts given as a function reach the load task unchanged', function()
+    local function opts() end
+    h.eq(find(factory.generate({ repo = 'x/y', config = h.noop, opts = opts }), 'load').opts, opts)
+end)
 
 test('a string starting with a colon becomes an Ex command task', function()
     local tasks =

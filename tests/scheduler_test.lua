@@ -38,7 +38,7 @@ end
 
 test('describe summarizes every trigger kind', function()
     local triggers =
-        { event = { 'BufRead' }, ft = { 'lua' }, cmd = { 'Foo' }, keys = { '<F5>', { '<F6>', 'n' } } }
+        { event = { 'BufRead' }, ft = { 'lua' }, cmd = { 'Foo' }, keys = { '<F5>', { '<F6>', mode = 'v' } } }
     h.eq(scheduler.describe(triggers), 'BufRead, ft:lua, :Foo, <F5>, <F6>')
 end)
 
@@ -165,6 +165,31 @@ test("a key trigger swaps its stub for the plugin's mapping", function()
     local real = vim.fn.maparg('<F9>', 'n', false, true)
     h.ok(real.callback ~= stub.callback, 'stub was not replaced')
     pcall(vim.keymap.del, 'n', '<F9>')
+end)
+
+test('a key with an rhs becomes a real mapping once the plugin loads', function()
+    fixture_plugin('rhsplug.nvim', 'rhsplug', '')
+    local key = { '<F8>', '<cmd>let g:rhs_key = 1<cr>', desc = 'Demo' }
+    start({ { name = 'rhsplug.nvim', keys = { key }, opts = {} } })
+    local stub = vim.fn.maparg('<F8>', 'n', false, true)
+    h.eq(type(stub.callback), 'function')
+    stub.callback()
+    h.ok(loaded('rhsplug.nvim'))
+    local real = vim.fn.maparg('<F8>', 'n', false, true)
+    h.eq(real.rhs, '<cmd>let g:rhs_key = 1<cr>')
+    h.eq(real.desc, 'Demo')
+    pcall(vim.keymap.del, 'n', '<F8>')
+end)
+
+test('any trigger defines the mappings of the keys with an rhs', function()
+    fixture_plugin('rhscmd.nvim', 'rhscmd', "vim.api.nvim_create_user_command('RhsCmd', function() end, {})")
+    start({
+        { name = 'rhscmd.nvim', cmd = 'RhsCmd', keys = { { '<F7>', '<cmd>RhsCmd<cr>' } }, opts = {} },
+    })
+    vim.cmd('RhsCmd')
+    h.ok(loaded('rhscmd.nvim'))
+    h.eq(vim.fn.maparg('<F7>', 'n', false, true).rhs, '<cmd>RhsCmd<cr>')
+    pcall(vim.keymap.del, 'n', '<F7>')
 end)
 
 test('loading a plugin loads its lazy dependencies first', function()

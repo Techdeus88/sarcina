@@ -5,21 +5,12 @@
 
 local M = {}
 
+local keys = require('sarcina.keys')
 local tasks = require('sarcina.tasks')
 local ui = require('sarcina.ui')
 
 -- name -> { name, triggers, deferred, deps, state = waiting|loading|loaded|failed, ... }
 M._plugins = {}
-
-local function parse_key(map)
-    if type(map) == 'string' then return { lhs = map, mode = 'n', opts = {} } end
-    return {
-        lhs = map.lhs or map[1],
-        mode = map.mode or map[2] or 'n',
-        desc = map.desc or map[3],
-        opts = map.opts or {},
-    }
-end
 
 --- One-line summary of a triggers table, e.g. "BufRead, ft:lua, :Telescope, <leader>ff".
 function M.describe(triggers)
@@ -34,7 +25,7 @@ function M.describe(triggers)
         table.insert(parts, ':' .. cmd)
     end
     for _, map in ipairs(triggers.keys or {}) do
-        table.insert(parts, parse_key(map).lhs)
+        table.insert(parts, keys.parse(map).lhs)
     end
     return table.concat(parts, ', ')
 end
@@ -150,9 +141,10 @@ local function arm(plugin)
     end
 
     for _, map in ipairs(triggers.keys or {}) do
-        local key = parse_key(map)
+        local key = keys.parse(map)
         if key.lhs then
-            local opts = vim.tbl_extend('force', { silent = true, desc = key.desc }, key.opts)
+            -- The stub only loads the plugin; the options that shape the real mapping wait for its rhs.
+            local opts = { silent = key.opts.silent, desc = key.opts.desc, nowait = key.opts.nowait }
             vim.keymap.set(key.mode, key.lhs, function() M.load(name, prepare_keys(key.lhs)) end, opts)
             table.insert(plugin.keymaps, { mode = key.mode, lhs = key.lhs })
         end

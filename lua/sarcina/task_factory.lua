@@ -5,6 +5,7 @@
 -- shorthand fields into the normalized task structures that the task engine
 -- understands.
 
+local keys = require('sarcina.keys')
 local main_module = require('sarcina.main_module')
 
 local M = {}
@@ -38,6 +39,28 @@ local function lua_task(id, value, opts)
         task.script = value
     end
     return task
+end
+
+-- A string `build` is a shell command, or an Ex command when it starts with ':'. It runs only when the
+-- plugin's commit changes (see per_commit in executors.lua).
+local function build_task(build)
+    local task
+    if type(build) == 'string' and build:sub(1, 1) ~= ':' then
+        task = { id = 'build', type = 'shell', cmd = build }
+    else
+        task = lua_task('build', build)
+    end
+    task.per_commit = true
+    return task
+end
+
+-- The `keys` entries that carry an rhs, which the plugin's load defines as mappings.
+local function mapped_keys(spec)
+    local mapped = {}
+    for _, map in ipairs(as_list(spec.keys) or {}) do
+        if keys.parse(map).rhs ~= nil then table.insert(mapped, map) end
+    end
+    return #mapped > 0 and mapped or nil
 end
 
 local function repo_name(repo)
@@ -75,7 +98,7 @@ local function load_task(spec)
     end, spec.opts)
 end
 
--- Task order: before, install, build, then rtp, load, after. A lazy plugin swaps the last three
+-- Task order: before, install, build, then rtp, load, keys, after. A lazy plugin swaps the last four
 -- for one load_trigger task that carries them and runs them when a trigger fires.
 function M.generate(spec)
     local triggers = spec.triggers
@@ -88,15 +111,13 @@ function M.generate(spec)
 
     if spec.repo then table.insert(tasks, { id = 'install', type = 'git_clone', repo = spec.repo }) end
 
-    if spec.build then
-        local build = lua_task('build', spec.build)
-        build.per_commit = true
-        table.insert(tasks, build)
-    end
+    if spec.build then table.insert(tasks, build_task(spec.build)) end
 
     local loading = { { id = 'rtp', type = 'rtp' } }
     local load = load_task(spec)
     if load then table.insert(loading, load) end
+    local mapped = mapped_keys(spec)
+    if mapped then table.insert(loading, { id = 'keys', type = 'keymaps', keys = mapped }) end
     if spec.after then table.insert(loading, lua_task('after', spec.after)) end
 
     if lazy then
