@@ -126,7 +126,7 @@ function M.load(name, prepare)
     local claimed = {}
     claim(name, claimed)
     if #claimed == 0 then return end
-    local replay = prepare and prepare()
+    local again = prepare and prepare()
     for _, plugin in ipairs(claimed) do
         tasks.enqueue(plugin.name, { deps = plugin.deps, tasks = plugin.deferred }, { append = true })
     end
@@ -134,7 +134,7 @@ function M.load(name, prepare)
         for _, plugin in ipairs(claimed) do
             plugin.state = tasks.plugin_failed(plugin.name) and 'failed' or 'loaded'
         end
-        if replay and M._plugins[name].state == 'loaded' then replay() end
+        if again and M._plugins[name].state == 'loaded' then again() end
     end, { quiet = true, append = true })
 end
 

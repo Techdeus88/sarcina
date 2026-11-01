@@ -14,9 +14,10 @@ lua/sarcina/
 ├── main_module.lua   finds the module that a plugin's opts belong to
 ├── tasks.lua         task store and async runner; owns all task state
 ├── executors.lua     one function per task type (git_clone, rtp, lua, cmd, shell, keymaps, trigger, make)
-├── scheduler.lua     lazy-load stubs, deferred loading, trigger replay
+├── scheduler.lua     lazy-load stubs and deferred loading for plugin triggers
 ├── keys.lua          parses `keys` entries into a lhs, an rhs, a mode and options
-├── load.lua          when code runs: now, later, now_if_args, event and filetype, all under safely
+├── load.lua          when code runs: now, later, now_if_args, event, ft, cmd and key, all under safely
+├── replay.lua        repeats the command, key or event that woke a plugin, after it loads
 ├── startup.lua       splits a resolved manifest into the now phase and the queued rest
 ├── installer.lua     queues a resolved manifest and runs it (:Sarcina install)
 ├── paths.lua         install and staging locations
@@ -100,8 +101,22 @@ sarcina.now(function() vim.cmd.colorscheme('poimandres') end)
 sarcina.later(function() require('some.heavy.module').setup() end)
 sarcina.now_if_args(function() vim.cmd('syntax on') end)
 sarcina.safely('event:BufReadPost *.lua', function() ... end)
-sarcina.safely('filetype:markdown', function() ... end)
+sarcina.safely('ft:markdown', function() ... end)
+sarcina.safely('cmd:Telescope', function() ... end)
+sarcina.safely('keys:<leader>ff', function() ... end)
+sarcina.safely('keys:nv <leader>y', function() ... end)
 ```
+
+The four trigger loaders run the callback once, when they fire, and then repeat what fired them, after the callback has succeeded:
+
+| Loader | Fires on | Repeats |
+| --- | --- | --- |
+| `event:<Event> [pattern]` | the autocmd | the autocmds the callback added, and only those |
+| `ft:<filetype>` | `FileType` | the same |
+| `cmd:<Command>` | the command | the command, with its args, bang, range and modifiers |
+| `keys:[modes ]<lhs>` | the mapping, in normal mode unless modes come first | the key, fed again |
+
+The loaders are named like the spec fields. The stub is removed before the callback runs, so the callback can define the real command or mapping. If the callback fails, the error is reported and nothing is repeated.
 
 `later` callbacks run in the order received, one per tick, after `UIEnter`. Errors raised before the UI is up are held and shown after it.
 

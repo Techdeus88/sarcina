@@ -1,9 +1,10 @@
 -- sarcina/load.lua
 -- When code runs. `now` runs it inline, before the UI exists. `later` queues it for after `UIEnter`
 -- (after `VimEnter` when no UI attaches), one callback per tick, so the screen can paint in between.
--- `event:` and `filetype:` run it once, when they fire. Every callback runs under `safely`: an
--- error is reported and never stops the callbacks after it.
+-- `event:`, `ft:`, `keys:` and `cmd:` run it once, when they fire, then repeat what fired them. Every
+-- callback runs under `safely`: an error is reported and never stops the callbacks after it.
 
+local replay = require('sarcina.replay')
 local ui = require('sarcina.ui')
 
 local M = {}
@@ -81,18 +82,56 @@ function M.now_if_args(f)
     M.later(f)
 end
 
---- Run `f` at `when`: 'now', 'later', 'now_if_args', 'event:<Event> [pattern]' or 'filetype:<ft>'.
+-- Runs `f` between the preparation and the replay of a trigger. The trigger only repeats after a success.
+local function with_replay(prepare, f)
+    local again = prepare()
+    if run(f) then again() end
+end
+
+local LOADERS = {
+    event = function(what, f)
+        local event, pattern = what:match('^(%S+)%s+(.+)$')
+        event = event or what
+        vim.api.nvim_create_autocmd(event, {
+            pattern = pattern,
+            once = true,
+            callback = function(args) with_replay(replay.event(event, args), f) end,
+        })
+    end,
+    ft = function(what, f)
+        vim.api.nvim_create_autocmd('FileType', {
+            pattern = what,
+            once = true,
+            callback = function(args) with_replay(replay.event('FileType', args), f) end,
+        })
+    end,
+    cmd = function(name, f)
+        vim.api.nvim_create_user_command(name, function(opts)
+            pcall(vim.api.nvim_del_user_command, name)
+            with_replay(replay.command(name, opts), f)
+        end, { nargs = '*', bang = true, range = true })
+    end,
+    -- 'keys:<lhs>' maps in normal mode; 'keys:nv <lhs>' names the modes first.
+    keys = function(what, f)
+        local modes, lhs = what:match('^([nvxsoilct!]+)%s+(.+)$')
+        modes, lhs = vim.split(modes or 'n', ''), lhs or what
+        vim.keymap.set(modes, lhs, function()
+            pcall(vim.keymap.del, modes, lhs)
+            with_replay(replay.keys(lhs), f)
+        end, { silent = true, desc = 'sarcina: load, then ' .. lhs })
+    end,
+}
+
+--- Run `f` at `when`: 'now', 'later', 'now_if_args', or a trigger that runs it once and then repeats
+--- what fired it: 'event:<Event> [pattern]', 'ft:<filetype>', 'keys:[modes ]<lhs>', 'cmd:<Command>'.
 function M.safely(when, f)
     if when == 'now' then return M.now(f) end
     if when == 'later' then return M.later(f) end
     if when == 'now_if_args' then return M.now_if_args(f) end
     local kind, what = tostring(when):match('^(%a+):(.+)$')
-    local fire = function() run(f) end -- returns nothing, so the autocmd is not deleted early
-    if kind == 'event' then
-        local event, pattern = what:match('^(%S+)%s+(.+)$')
-        vim.api.nvim_create_autocmd(event or what, { pattern = pattern, once = true, callback = fire })
-    elseif kind == 'filetype' then
-        vim.api.nvim_create_autocmd('FileType', { pattern = what, once = true, callback = fire })
+    local loader = kind and LOADERS[kind]
+    if loader then
+        loader(what, f)
     else
         report('Unknown load time: ' .. tostring(when))
     end
