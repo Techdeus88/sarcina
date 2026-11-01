@@ -29,7 +29,7 @@ local function plan_of(spec)
     return plan
 end
 
---- Remember each plugin's timing and task plan, from a resolved manifest, in load order.
+--- Remember each plugin's timing and task plan, from a resolved manifest, in the resolver's order.
 function M.register(resolved)
     registered, order = {}, {}
     for _, entry in ipairs(resolved) do
@@ -162,8 +162,25 @@ function M.plugin(name)
     if registered[name] then return row_of(name) end
 end
 
---- `plugin` for every registered plugin, in load order.
-function M.plugins() return vim.tbl_map(row_of, order) end
+-- Plugin names in the order they loaded, from the tracker's record of how jobs ended: a plugin takes its
+-- place where its rtp task finished. The plugins that have not loaded yet follow in the resolver's order.
+local function load_order()
+    local list, loaded = {}, {}
+    for _, job in ipairs(track.finished_jobs()) do
+        if job.id == 'rtp' and job.status == 'done' and registered[job.plugin] and not loaded[job.plugin] then
+            loaded[job.plugin] = true
+            table.insert(list, job.plugin)
+        end
+    end
+    for _, name in ipairs(order) do
+        if not loaded[name] then table.insert(list, name) end
+    end
+    return list
+end
+
+--- `plugin` for every registered plugin, in the order they loaded. A plugin that has not loaded yet comes
+--- after the ones that have, so a row moves up when its plugin loads.
+function M.plugins() return vim.tbl_map(row_of, load_order()) end
 
 --- Forget the origin and the registered plugins. For tests.
 function M._reset()

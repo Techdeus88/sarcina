@@ -221,9 +221,10 @@ local function put_ends(buf)
     put(buf, #names + 2, 2, footer_lines())
 end
 
---- Draws every line from the stats: one row per registered plugin. Fixes the width and the height.
-function M.draw(buf)
-    local list = stats.plugins()
+--- Draws every line from the stats: one row per registered plugin, in the order they loaded. Fixes the
+--- width and the height. `list` is `stats.plugins()` when the caller already has it.
+function M.draw(buf, list)
+    list = list or stats.plugins()
     entries, line_of, rows, names = {}, {}, {}, {}
     measure(list)
     local lines = { build_line({}) }
@@ -242,19 +243,23 @@ function M.draw(buf)
 end
 
 --- Redraws the rows of the plugins in `dirty` (a set of names), the header and the footer. Draws everything
---- instead when a plugin that was never drawn has changed. Returns true when it drew everything.
+--- instead when the order of the plugins changed, because one loaded or one was never drawn. Returns true
+--- when it drew everything.
 function M.refresh(buf, dirty)
-    local fresh = {}
-    for name in pairs(dirty) do
-        fresh[name] = stats.plugin(name)
-        if fresh[name] and not line_of[name] then
-            M.draw(buf)
-            return true
-        end
+    local list = stats.plugins()
+    local same = #list == #names
+    for i, row in ipairs(list) do
+        same = same and names[i] == row.name
     end
-    for name, row in pairs(fresh) do
-        rows[name] = row
-        put(buf, line_of[name], 1, { row_line(row) })
+    if not same then
+        M.draw(buf, list)
+        return true
+    end
+    for _, row in ipairs(list) do
+        if dirty[row.name] then
+            rows[row.name] = row
+            put(buf, line_of[row.name], 1, { row_line(row) })
+        end
     end
     put_ends(buf)
     return false

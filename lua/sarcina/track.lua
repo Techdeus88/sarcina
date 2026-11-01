@@ -7,6 +7,7 @@ local M = {}
 
 local history = {}
 local by_plugin = {}
+local ended = {} -- jobs in the order they ended
 
 local function ms(from, to) return (to - from) / 1e6 end
 
@@ -25,10 +26,15 @@ function M.started(job) job.started = job.started or vim.uv.hrtime() end
 function M.finished(job)
     job.ended = vim.uv.hrtime()
     job.duration = ms(job.started, job.ended)
+    table.insert(ended, job)
 end
 
 --- Every job of the session, as the live tables.
 function M.history() return history end
+
+--- Every job that ended, ok or not, in the order it ended, as the live tables. A retried job is in it
+--- once per end. This is the record of the order things really happened in, such as plugins loading.
+function M.finished_jobs() return ended end
 
 --- The jobs of one plugin in creation order, as the live tables.
 function M.jobs_of(name) return by_plugin[name] or {} end
@@ -63,7 +69,7 @@ end
 
 --- Forget the history. For tests.
 function M._reset()
-    history, by_plugin = {}, {}
+    history, by_plugin, ended = {}, {}, {}
 end
 
 return M

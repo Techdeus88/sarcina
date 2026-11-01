@@ -149,6 +149,44 @@ test('stats.plugins lists the registered plugins in load order, dependencies fir
     h.eq(stats.plugin('stonone'), nil)
 end)
 
+test('the rows follow the order the plugins really load: now, then later, then the trigger', function()
+    for _, name in ipairs({ 'stolater', 'stotrig', 'stonow' }) do
+        installed(name .. '.nvim', name)
+    end
+    begin({
+        { name = 'stolater.nvim', repo = 'x/stolater', opts = {} },
+        { name = 'stotrig.nvim', repo = 'x/stotrig', cmd = 'StatsOrderCmd', opts = {} },
+        { name = 'stonow.nvim', repo = 'x/stonow', load = 'now', opts = {} },
+    })
+    h.eq(h.names(stats.plugins()), { 'stonow.nvim', 'stolater.nvim', 'stotrig.nvim' })
+    h.ok(tasks.wait(2000))
+    h.eq(h.names(stats.plugins()), { 'stonow.nvim', 'stolater.nvim', 'stotrig.nvim' })
+    scheduler.load('stotrig.nvim')
+    h.ok(vim.wait(2000, function() return scheduler.state('stotrig.nvim') == 'loaded' end))
+    h.ok(tasks.wait(2000))
+    h.eq(h.names(stats.plugins()), { 'stonow.nvim', 'stolater.nvim', 'stotrig.nvim' })
+end)
+
+test('a plugin takes its row where it loaded, not where the manifest lists it', function()
+    installed('stfirst.nvim', 'stfirst')
+    installed('stsecond.nvim', 'stsecond')
+    local first = {
+        name = 'stfirst.nvim',
+        tasks = { { id = 'wait', type = 's_idle' }, { id = 'rtp', type = 'rtp' } },
+    }
+    local second = { name = 'stsecond.nvim', tasks = { { id = 'rtp', type = 'rtp' } } }
+    h.register({ first, second })
+    h.eq(h.names(stats.plugins()), { 'stfirst.nvim', 'stsecond.nvim' })
+    tasks.enqueue('stfirst.nvim', first)
+    tasks.enqueue('stsecond.nvim', second)
+    tasks.run_all()
+    h.ok(vim.wait(500, function() return stats.plugin('stsecond.nvim').state == 'loaded' end))
+    h.eq(h.names(stats.plugins()), { 'stsecond.nvim', 'stfirst.nvim' })
+    releases['stfirst.nvim']()
+    h.ok(tasks.wait(2000))
+    h.eq(h.names(stats.plugins()), { 'stsecond.nvim', 'stfirst.nvim' })
+end)
+
 test('an installed later plugin goes from pending to loaded, its install counted as done', function()
     installed('stplater.nvim', 'stplater')
     begin({ { name = 'stplater.nvim', repo = 'x/stplater', opts = {} } })

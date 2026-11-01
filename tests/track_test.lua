@@ -106,6 +106,18 @@ test('the jobs of one plugin come back in creation order, and an unknown plugin 
     h.eq(track.jobs_of('none'), {})
 end)
 
+test('the finished jobs come back in the order they ended, not the order they were created', function()
+    executors.t_late = function(_, done)
+        vim.defer_fn(function() done(true) end, 40)
+    end
+    h.run({
+        { name = 'slow', tasks = { { id = 'a', type = 't_late' } } },
+        { name = 'fast', tasks = { h.lua('b', h.noop) } },
+    })
+    h.eq(h.ids(track.history()), { 'a', 'b' })
+    h.eq(h.ids(track.finished_jobs()), { 'b', 'a' })
+end)
+
 test('tasks that run inline are tracked too', function()
     tasks.run_inline('p', { tasks = { h.lua('a', h.noop) } })
     local record = find(track.records(vim.uv.hrtime() - 1e9), 'p', 'a')

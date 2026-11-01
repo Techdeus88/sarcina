@@ -45,12 +45,25 @@ local function announce_ready()
     vim.api.nvim_exec_autocmds('User', { pattern = 'SarcinaReady', modeline = false, data = stats.get() })
 end
 
+-- The `now` plugins first, then the rest, each group in the resolver's order. The runner starts plugins in
+-- the order they were queued, so this is what puts the eager ones ahead after the installs. A dependency
+-- has the earliest timing of its dependents, so it is never behind a plugin that needs it.
+local function now_first(resolved)
+    local ordered = {}
+    for _, now in ipairs({ true, false }) do
+        for _, entry in ipairs(resolved) do
+            if (entry.timing == 'now') == now then table.insert(ordered, entry) end
+        end
+    end
+    return ordered
+end
+
 --- Run the `now` phase and queue the rest. The queued run starts once the UI is up.
 function M.start(resolved)
     tasks.begin()
     local loaded = {} -- plugin name -> true once its loading tasks have run
     local count = 0
-    for _, entry in ipairs(resolved) do
+    for _, entry in ipairs(now_first(resolved)) do
         local spec, name = entry.spec, entry.name
         local rest = spec.tasks
         if entry.generated and installed(name) then

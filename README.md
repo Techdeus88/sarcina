@@ -167,7 +167,7 @@ vim.api.nvim_create_autocmd('User', {
 
 ### Rows
 
-`require('sarcina.stats').plugins()` returns one row per plugin in load order, and `plugin(name)` returns one row. A row is read from the tracked tasks, so it is always current.
+`require('sarcina.stats').plugins()` returns one row per plugin in the order they loaded, with the ones that have not loaded after them, and `plugin(name)` returns one row. A row is read from the tracked tasks, so it is always current.
 
 ```lua
 { name = 'telescope.nvim', timing = 'trigger', state = 'waiting', task = 2, tasks = 6,
@@ -209,13 +209,15 @@ To look at every tracked time, run `:lua vim.print(require('sarcina.stats').task
 
 `tasks.enqueue(name, spec, { append = true })` and `tasks.run_all(cb, { append = true })` add to the job list instead of starting a new one, and the summary then counts only the jobs added since the last one. The scheduler uses this for the loads that triggers start.
 
+`track.finished_jobs()` lists the jobs in the order they ended, which is the record of what really happened first.
+
 Every job is stamped by `track` when it is created, started and finished: `created`, `started` and `ended` (hrtime, ns) and `duration` (ms, from the first start, retries included). A fresh run replaces `snapshot()` but not `track.history()`, which keeps every job of the session.
 
 Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.snapshot()` returns the jobs in queue order plus a count per status. Each change fires `ui.emit('task', job)`, and `ui.on('task', fn)` listens for them.
 
 ## Window
 
-One row per plugin, in load order, between a header and a footer:
+One row per plugin between a header and a footer, in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. So `now` plugins that are installed come first, since they load before the UI, then the `later` ones as they finish, then triggered ones as they fire.
 
 ```
  Sarcina · 12 of 55 plugins · 4 running · 1 failed

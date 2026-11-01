@@ -68,6 +68,22 @@ test('a now plugin whose dependency is not installed yet loads after the depende
     h.eq(_G.start_log, { 'setup:storphan.nvim' })
 end)
 
+if vim.fn.executable('git') == 1 then
+    test('on a first install the now plugins load first, though the manifest lists them last', function()
+        begin({
+            { name = 'stfreshlater.nvim', repo = h.make_repo(), config = function() log('load:later') end },
+            {
+                name = 'stfreshnow.nvim',
+                repo = h.make_repo(),
+                load = 'now',
+                config = function() log('load:now') end,
+            },
+        })
+        h.ok(tasks.wait(5000))
+        h.eq(_G.start_log, { 'load:now', 'load:later' })
+    end)
+end
+
 test('a build waits for the UI even for a now plugin', function()
     installed('stbuilt.nvim', 'stbuilt')
     begin({
