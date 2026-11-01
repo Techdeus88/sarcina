@@ -200,7 +200,7 @@ To look at every tracked time, run `:lua vim.print(require('sarcina.stats').task
 ## How the task engine works
 
 - Tasks for one plugin run in order. Plugins run in parallel, up to `tasks.max_concurrent` (default 4).
-- Installs go first. Every `install` task starts at once, whatever its plugin depends on, up to `tasks.max_installs` (default 8). No other task starts until all installs have finished. Then the rest of each plugin's tasks run, dependencies first.
+- Installs go first. Every `install` task starts at once, whatever its plugin depends on, up to `tasks.max_installs` (default 8). No other task starts until all installs have finished. Then the rest of each plugin's tasks run, dependencies first, and the `now` plugins are queued ahead of the others, so they start first.
 - A plugin starts only after the plugins in its `deps` have finished.
 - If a task fails, the rest of that plugin's tasks and every plugin that depends on it are marked `skipped`.
 - A task with `retries = n` runs up to `n + 1` times before it counts as failed.
@@ -229,6 +229,8 @@ One row per plugin between a header and a footer, in the order the plugins load.
  55 plugins · 25 loaded · 30 not loaded · 7 now · 18 later · 30 triggered · startup 83 ms
  slowest: telescope.nvim 2.1s · avante.nvim 1.4s · nvim-treesitter 0.9s
 ```
+
+The time on a row is the run time of all that plugin's tasks added up (clone, build, `rtp`, config, and the rest), not the load alone. A task counts when it ends, and time spent waiting behind the install barrier or a dependency does not. For one task at a time, run `:lua vim.print(require('sarcina.stats').tasks())`.
 
 The window reads the stats and keeps no task state, so it cannot drift from the engine. A row is redrawn when an event arrives for its plugin, and the footer is `stats.get()` plus the slowest plugins. It is centered, as wide as its content up to 80% of the editor, and scrolls beyond 80% of its height. Its size is fixed when it opens, so streaming output never moves it.
 

@@ -73,8 +73,11 @@ end
 
 local function pad(text, width) return text .. string.rep(' ', width - width_of(text)) end
 
+-- Every plugin that ran gets a time. Under 10 ms it keeps a decimal, since most plugins load that fast.
 local function format_time(ms)
-    if not ms or ms < 10 then return '' end
+    if not ms then return '' end
+    if ms < 0.1 then return '<0.1ms' end
+    if ms < 10 then return string.format('%.1fms', ms) end
     if ms < 1000 then return string.format('%dms', math.floor(ms)) end
     return string.format('%.1fs', ms / 1000)
 end
@@ -148,7 +151,7 @@ end
 local function footer_lines()
     local slowest = {}
     for _, name in ipairs(names) do
-        if rows[name].duration and rows[name].duration >= 10 then table.insert(slowest, rows[name]) end
+        if rows[name].duration then table.insert(slowest, rows[name]) end
     end
     table.sort(slowest, function(a, b) return a.duration > b.duration end)
     local parts = {}

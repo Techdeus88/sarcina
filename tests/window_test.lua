@@ -60,7 +60,8 @@ test('there is one row per plugin in load order, with its state and its task cou
             h.ok(got[i + 1]:find('plugin' .. i, 1, true), 'row ' .. i .. ' is ' .. got[i + 1])
         end
         h.ok(got[2]:find('✔ plugin1%s+later%s+loaded%s+2 of 2 tasks'), got[2])
-        h.ok(got[4]:find('✘ plugin3%s+later%s+failed%s+2 of 2 tasks%s+boom'), got[4])
+        h.ok(got[2]:find('2 of 2 tasks%s+[<%d%.]+ms'), 'a fast plugin has no time: ' .. got[2])
+        h.ok(got[4]:find('✘ plugin3%s+later%s+failed%s+2 of 2 tasks%s+[<%d%.]+ms%s+boom'), got[4])
     end)
 end)
 
@@ -97,7 +98,7 @@ test('the footer is the stats and the slowest plugins, the header the progress',
         local got = lines()
         h.eq(got[1], ' Sarcina · 2 of 2 plugins')
         h.eq(got[#got - 1], ' ' .. window.summary(stats.get()))
-        h.ok(got[#got]:find('^ slowest: slow %d+ms$'), got[#got])
+        h.ok(got[#got]:find('^ slowest: slow %d+ms · fast [<%d%.]+ms$'), got[#got])
     end)
 end)
 

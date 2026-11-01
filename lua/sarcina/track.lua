@@ -22,9 +22,10 @@ end
 --- A job began running. A retry keeps the first start.
 function M.started(job) job.started = job.started or vim.uv.hrtime() end
 
---- A job ended, ok or not: `duration` is the end minus the first start, in ms.
-function M.finished(job)
-    job.ended = vim.uv.hrtime()
+--- A job ended, ok or not: `duration` is the end minus the first start, in ms. `at` is the hrtime the
+--- executor said it was done, which can be earlier than now when the runner handles it later.
+function M.finished(job, at)
+    job.ended = at or vim.uv.hrtime()
     job.duration = ms(job.started, job.ended)
     table.insert(ended, job)
 end

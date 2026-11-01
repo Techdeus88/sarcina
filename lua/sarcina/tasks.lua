@@ -238,8 +238,10 @@ local function settle()
     end
 end
 
-local function finish(plugin, job, ok, msg)
-    track.finished(job)
+-- `ended` is when the executor said it was done. The runner handles the result later, after the work of
+-- the plugins that started beside it, so stamping the time here would charge that work to this task.
+local function finish(plugin, job, ok, msg, ended)
+    track.finished(job, ended)
     if ok then
         job.status = 'done'
         job.note = type(msg) == 'string' and msg or nil
@@ -270,7 +272,8 @@ function run_job(plugin, job)
     local function done(ok, msg)
         if settled then return end
         settled = true
-        vim.schedule(function() finish(plugin, job, ok, msg) end)
+        local ended = vim.uv.hrtime()
+        vim.schedule(function() finish(plugin, job, ok, msg, ended) end)
     end
     -- Without a line it only tells the UI that the job changed, such as `job.working` being set.
     local function report(line)

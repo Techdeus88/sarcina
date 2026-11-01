@@ -106,6 +106,23 @@ test('the jobs of one plugin come back in creation order, and an unknown plugin 
     h.eq(track.jobs_of('none'), {})
 end)
 
+test('a duration is the work of the task, not the time the loop spent on the tasks beside it', function()
+    local function busy(ms)
+        local from = vim.uv.hrtime()
+        while (vim.uv.hrtime() - from) / 1e6 < ms do
+        end
+    end
+    local plugins = {}
+    for i = 1, 4 do
+        table.insert(plugins, { name = 'busy' .. i, tasks = { h.lua('load', function() busy(40) end) } })
+    end
+    h.run(plugins)
+    for i = 1, 4 do
+        local duration = h.job('busy' .. i, 'load').duration
+        h.ok(duration >= 39 and duration < 100, 'busy' .. i .. ' took ' .. duration .. ' ms of its own 40')
+    end
+end)
+
 test('the finished jobs come back in the order they ended, not the order they were created', function()
     executors.t_late = function(_, done)
         vim.defer_fn(function() done(true) end, 40)
