@@ -24,7 +24,24 @@ end
 
 function subcommands.sync(_) ui.emit('info', 'Sync (install + prune) not yet implemented') end
 
-function subcommands.stats(_) ui.emit('info', 'Stats command placeholder') end
+function subcommands.stats(_)
+    local stats = require('sarcina.stats').get()
+    local startup = stats.startup_ms and string.format('startup %.0f ms', stats.startup_ms)
+        or 'startup pending'
+    ui.emit(
+        'info',
+        string.format(
+            '%d plugins · %d loaded · %d not loaded · %d now · %d later · %d triggered · %s',
+            stats.count,
+            stats.loaded,
+            stats.not_loaded,
+            stats.now,
+            stats.later,
+            stats.triggered,
+            startup
+        )
+    )
+end
 
 function subcommands.panel(_) ui.toggle() end
 

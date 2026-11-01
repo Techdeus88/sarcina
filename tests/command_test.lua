@@ -12,6 +12,27 @@ test(':Sarcina dispatches subcommands', function()
     h.ok(h.notified('bogus'))
 end)
 
+test(':Sarcina stats prints the numbers on one line', function()
+    vim.cmd('runtime plugin/sarcina.lua')
+    require('sarcina.stats').register({
+        { name = 'a', timing = 'now' },
+        { name = 'b', timing = 'later' },
+        { name = 'c', timing = 'trigger' },
+    })
+    require('sarcina.load')._reset(false)
+    vim.cmd('Sarcina stats')
+    h.ok(
+        h.notified(
+            '3 plugins · 0 loaded · 3 not loaded · 1 now · 1 later · 1 triggered · startup pending'
+        )
+    )
+    local load = require('sarcina.load')
+    load._open()
+    h.ok(vim.wait(1000, load.idle, 5), 'the load gate did not settle')
+    vim.cmd('Sarcina stats')
+    h.ok(h.notified(' ms'))
+end)
+
 test(':Sarcina panel says so when there is nothing to show', function()
     vim.cmd('runtime plugin/sarcina.lua')
     vim.cmd('Sarcina panel')

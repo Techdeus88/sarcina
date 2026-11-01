@@ -6,8 +6,7 @@ local M = {}
 
 local ui = require('sarcina.ui')
 local executors = require('sarcina.executors')
-
-local uv = vim.uv
+local track = require('sarcina.track')
 
 M.max_concurrent = 4
 M.max_installs = 8
@@ -79,7 +78,7 @@ local function plugin_record(name, plugin_spec)
 end
 
 local function new_job(plugin_name, task)
-    return {
+    local job = {
         plugin = plugin_name,
         id = task.id,
         type = task.type,
@@ -87,6 +86,8 @@ local function new_job(plugin_name, task)
         status = 'pending',
         attempts = 0,
     }
+    track.created(job)
+    return job
 end
 
 --- Enqueue all tasks for a given plugin spec (if conditions pass).
@@ -114,7 +115,7 @@ end
 local function run_now(job)
     job.attempts = 1
     job.status = 'running'
-    job.started = uv.hrtime()
+    track.started(job)
     emit(job)
     local result
     local function done(ok, msg) result = result or { ok = ok, msg = msg } end
@@ -127,7 +128,7 @@ local function run_now(job)
         if not result then vim.wait(60000, function() return result ~= nil end, 1) end
         if not result then done(false, 'timed out') end
     end
-    job.duration = (uv.hrtime() - job.started) / 1e6
+    track.finished(job)
     if result.ok then
         job.status = 'done'
         job.note = type(result.msg) == 'string' and result.msg or nil
@@ -238,7 +239,7 @@ local function settle()
 end
 
 local function finish(plugin, job, ok, msg)
-    job.duration = (uv.hrtime() - job.started) / 1e6
+    track.finished(job)
     if ok then
         job.status = 'done'
         job.note = type(msg) == 'string' and msg or nil
@@ -261,7 +262,7 @@ function run_job(plugin, job)
     job.status = 'running'
     job.error = nil
     job.output = nil
-    job.started = job.started or uv.hrtime()
+    track.started(job)
     emit(job)
 
     local settled = false

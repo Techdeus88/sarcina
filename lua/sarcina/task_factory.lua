@@ -41,6 +41,12 @@ local function lua_task(id, value, opts)
     return task
 end
 
+-- Clones the plugin's repo. Specs without a repo (local plugins) have nothing to install.
+local function install_task(spec)
+    if not spec.repo then return nil end
+    return { id = 'install', type = 'git_clone', repo = spec.repo, phase = 'install' }
+end
+
 -- A string `build` is a shell command, or an Ex command when it starts with ':'. It runs only when the
 -- plugin's commit changes (see per_commit in executors.lua).
 local function build_task(build)
@@ -106,9 +112,8 @@ function M.generate(spec)
     local lazy = type(triggers) == 'table'
     local tasks = {}
 
-    if spec.repo then
-        table.insert(tasks, { id = 'install', type = 'git_clone', repo = spec.repo, phase = 'install' })
-    end
+    local install = install_task(spec)
+    if install then table.insert(tasks, install) end
 
     local before = spec.init or spec.before
     if before then table.insert(tasks, lua_task('before', before)) end

@@ -9,7 +9,7 @@ local ui = require('sarcina.ui')
 
 local M = {}
 
-local ready = false -- startup is over: UIEnter, or VimEnter with no UI
+local ready = false -- when startup ended (an hrtime): UIEnter, or VimEnter with no UI
 local draining = false
 local queue = {} -- `later` callbacks, in the order received
 local held = {} -- errors from before startup ended, shown once the UI is up
@@ -45,7 +45,7 @@ end
 
 local function open()
     if ready then return end
-    ready = true
+    ready = vim.uv.hrtime()
     for _, err in ipairs(held) do
         ui.emit('error', err)
     end
@@ -54,7 +54,7 @@ local function open()
 end
 
 if vim.v.vim_did_enter == 1 then
-    ready = true
+    ready = vim.uv.hrtime()
 else
     local group = vim.api.nvim_create_augroup('sarcina_load', { clear = true })
     vim.api.nvim_create_autocmd('UIEnter', { group = group, once = true, callback = open })
@@ -137,13 +137,16 @@ function M.safely(when, f)
     end
 end
 
+--- The hrtime at which startup ended, or nil while the UI is not up yet.
+function M.ready_at() return ready or nil end
+
 --- True when no `later` callback is queued or running.
 function M.idle() return #queue == 0 and not draining end
 
 --- Forget the queue and the held errors, and set whether startup is over. For tests.
 function M._reset(is_ready)
     queue, held, draining = {}, {}, false
-    ready = is_ready ~= false
+    ready = is_ready ~= false and vim.uv.hrtime()
 end
 
 --- Pretend startup is over. For tests.

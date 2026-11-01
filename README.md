@@ -6,17 +6,19 @@ A Neovim plugin manager built around a task engine. Each plugin expands into an 
 
 ```
 lua/sarcina/
-├── init.lua          setup(): load, resolve, start; exports now, later, now_if_args, safely
+├── init.lua          setup(): load, resolve, start; exports now, later, now_if_args, safely, stats
 ├── cli.lua           :Sarcina dispatcher (install, panel, help, ...)
 ├── manifest.lua      loads plugin specs from lua/plugins/**/*.lua
 ├── resolver.lua      orders plugins so dependencies come first, sets spec.triggers and each plugin's timing
 ├── task_factory.lua  turns spec fields (build, config, opts, event, ...) into tasks
 ├── main_module.lua   finds the module that a plugin's opts belong to
 ├── tasks.lua         task store and async runner; owns all task state
+├── track.lua         stamps every task's created, started, ended and duration; keeps the session history
+├── stats.lua         the public numbers: count, loaded, now, later, triggered, startup_ms
 ├── executors.lua     one function per task type (git_clone, rtp, lua, cmd, shell, keymaps, trigger, make)
 ├── scheduler.lua     lazy-load stubs and deferred loading for plugin triggers
 ├── keys.lua          parses `keys` entries into a lhs, an rhs, a mode and options
-├── load.lua          when code runs: now, later, now_if_args, event, ft, cmd and key, all under safely
+├── load.lua          when code runs: now, later, now_if_args, event, ft, keys and cmd, all under safely
 ├── replay.lua        repeats the command, key or event that woke a plugin, after it loads
 ├── startup.lua       splits a resolved manifest into the now phase and the queued rest
 ├── installer.lua     queues a resolved manifest and runs it (:Sarcina install)
@@ -132,12 +134,32 @@ A spec with `event`, `ft`, `cmd` or `keys` is lazy. The resolver normalizes thos
 
 Only the plugin's `plugin/` and `after/plugin/` files are sourced on a late load. `ftplugin`, `ftdetect` and `syntax` files take effect from the next buffer.
 
+## Stats
+
+```lua
+require('sarcina').stats()
+-- { count = 42, loaded = 40, not_loaded = 2, now = 5, later = 30, triggered = 7, startup_ms = 83.4 }
+```
+
+| Field | Is |
+| --- | --- |
+| `count` | plugins in the manifest |
+| `now`, `later`, `triggered` | plugins by timing, after dependency promotion, so they add up to `count`. They are configured timings, not how a plugin actually loaded |
+| `loaded` | plugins whose `rtp` task is done and none of whose tasks failed at their latest run |
+| `not_loaded` | `count - loaded`, which includes lazy plugins that have not fired a trigger yet |
+| `startup_ms` | milliseconds from the start of `setup()` to `UIEnter` (`VimEnter` when no UI attaches). Absent until then. It leaves out Neovim's own startup and your config before `setup()`; `nvim --startuptime` covers that |
+
+A plugin whose `load` fails after its `rtp`, or whose queued build fails, counts as not loaded. A plugin with explicit `tasks` counts as loaded only if one of them has `type = 'rtp'`.
+
+`require('sarcina.stats').tasks()` lists every task of the session with `plugin`, `id`, `type`, `status`, `attempts`, `note`, `error` and its `meta`, and with times in milliseconds since `setup()` began: `created`, `started`, `ended`, `duration` (end minus start) and `waited` (start minus creation, the time spent behind the install barrier or a dependency). A task that never ran has only `created`.
+
 ## Commands
 
 | Command | Does |
 | --- | --- |
 | `:Sarcina install` | resolve the manifest and run every plugin's tasks |
 | `:Sarcina panel` | toggle the task panel |
+| `:Sarcina stats` | print the stats on one line |
 | `:Sarcina help` | list subcommands |
 
 ## How the task engine works
@@ -151,6 +173,8 @@ Only the plugin's `plugin/` and `after/plugin/` files are sourced on a late load
 - Executors are `function(job, done, report)`. They call `done(ok, msg)` once and `report(line)` for live output. The runner owns every status change, so an executor cannot leave a task stuck in `running`.
 
 `tasks.enqueue(name, spec, { append = true })` and `tasks.run_all(cb, { append = true })` add to the job list instead of starting a new one, and the summary then counts only the jobs added since the last one. The scheduler uses this for lazy loads.
+
+Every job is stamped by `track` when it is created, started and finished: `created`, `started` and `ended` (hrtime, ns) and `duration` (ms, from the first start, retries included). A fresh run replaces `snapshot()` but not `track.history()`, which keeps every job of the session.
 
 Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.snapshot()` returns the jobs in queue order plus a count per status. Each change fires `ui.emit('task', job)`, and `ui.on('task', fn)` listens for them.
 
