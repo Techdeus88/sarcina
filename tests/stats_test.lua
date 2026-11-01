@@ -1,4 +1,5 @@
 local h = require('helpers')
+local executors = require('sarcina.executors')
 local load = require('sarcina.load')
 local paths = require('sarcina.paths')
 local resolver = require('sarcina.resolver')
@@ -124,6 +125,93 @@ test('stats.tasks lists every task with times since setup began', function()
     local records = stats.tasks()
     h.eq({ #records, records[1].id, records[2].id }, { 2, 'a', 'b' })
     h.ok(records[1].started >= 0 and records[1].ended <= records[2].ended)
+end)
+
+-- A task that stays running until `releases[plugin]()`. `s_hold` does real work, `s_idle` does none.
+local releases = {}
+executors.s_hold = function(job, done, report)
+    job.working = true
+    report('cloning')
+    releases[job.plugin] = function() done(true) end
+end
+executors.s_idle = function(job, done)
+    releases[job.plugin] = function() done(true) end
+end
+
+test('stats.plugins lists the registered plugins in load order, dependencies first', function()
+    stats.register(resolver.resolve({
+        { name = 'stoa', repo = 'x/stoa', deps = { 'stob' } },
+        { name = 'stob', repo = 'x/stob' },
+    }))
+    h.eq(h.names(stats.plugins()), { 'stob', 'stoa' })
+    local row = stats.plugin('stoa')
+    h.eq({ row.state, row.task, row.tasks, row.timing }, { 'pending', 0, 2, 'later' })
+    h.eq(stats.plugin('stonone'), nil)
+end)
+
+test('an installed later plugin goes from pending to loaded, its install counted as done', function()
+    installed('stplater.nvim', 'stplater')
+    begin({ { name = 'stplater.nvim', repo = 'x/stplater', opts = {} } })
+    local row = stats.plugin('stplater.nvim')
+    h.eq({ row.state, row.task, row.tasks, row.timing }, { 'pending', 1, 3, 'later' })
+    h.ok(tasks.wait(2000))
+    row = stats.plugin('stplater.nvim')
+    h.eq({ row.state, row.task, row.tasks }, { 'loaded', 3, 3 })
+end)
+
+test('a triggered plugin waits at its trigger task, and its whole plan counts once it loads', function()
+    installed('sttrig.nvim', 'sttrig')
+    begin({ { name = 'sttrig.nvim', repo = 'x/sttrig', cmd = 'StatsPlanCmd', opts = {} } })
+    local row = stats.plugin('sttrig.nvim')
+    h.eq({ row.state, row.task, row.tasks, row.timing }, { 'waiting', 2, 4, 'trigger' })
+    h.eq(row.detail, 'waiting for :StatsPlanCmd')
+    scheduler.load('sttrig.nvim')
+    h.ok(vim.wait(2000, function() return scheduler.state('sttrig.nvim') == 'loaded' end))
+    h.ok(tasks.wait(2000))
+    row = stats.plugin('sttrig.nvim')
+    h.eq({ row.state, row.task, row.tasks }, { 'loaded', 4, 4 })
+end)
+
+test('an install shows as work only once it does real work, and says what it is doing', function()
+    local idle = { name = 'stidle', tasks = { { id = 'install', type = 's_idle' }, h.lua('rtp', h.noop) } }
+    local busy = { name = 'stbusy', tasks = { { id = 'install', type = 's_hold' }, h.lua('rtp', h.noop) } }
+    h.register({ idle, busy })
+    tasks.enqueue('stidle', idle)
+    tasks.enqueue('stbusy', busy)
+    tasks.run_all()
+    h.ok(vim.wait(500, function() return stats.plugin('stbusy').state == 'installing' end))
+    local row = stats.plugin('stbusy')
+    h.eq({ row.task, row.tasks, row.detail }, { 1, 2, 'cloning' })
+    h.eq(stats.plugin('stidle').state, 'pending')
+    releases.stidle()
+    releases.stbusy()
+    h.ok(tasks.wait(2000))
+    h.eq({ stats.plugin('stidle').state, stats.plugin('stbusy').state }, { 'loaded', 'loaded' })
+end)
+
+test('a build that does real work shows as building', function()
+    local plugin = { name = 'stbuild', tasks = { { id = 'build', type = 's_hold' }, h.lua('rtp', h.noop) } }
+    h.register({ plugin })
+    tasks.enqueue('stbuild', plugin)
+    tasks.run_all()
+    h.ok(vim.wait(500, function() return stats.plugin('stbuild').state == 'building' end))
+    releases.stbuild()
+    h.ok(tasks.wait(2000))
+    h.eq(stats.plugin('stbuild').state, 'loaded')
+end)
+
+test('a failed task fails its row with the error, and a dependent of it is blocked', function()
+    local bad = {
+        name = 'stbad',
+        tasks = { h.lua('rtp', h.noop), h.lua('load', function() error('boom') end), h.lua('after', h.noop) },
+    }
+    local dependent = { name = 'stdependent', deps = { 'stbad' }, tasks = { h.lua('rtp', h.noop) } }
+    h.register({ bad, dependent })
+    h.run({ bad, dependent })
+    local row = stats.plugin('stbad')
+    h.eq({ row.state, row.task, row.tasks, row.detail }, { 'failed', 2, 3, 'boom' })
+    row = stats.plugin('stdependent')
+    h.eq({ row.state, row.task, row.tasks, row.detail }, { 'blocked', 0, 1, 'dependency stbad failed' })
 end)
 
 -- Runs a real startup in a child Neovim and prints the stats once the startup run is done.

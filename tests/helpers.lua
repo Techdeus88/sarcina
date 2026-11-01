@@ -5,6 +5,8 @@ local M = {}
 
 M.notes = {}
 
+local registered = {}
+
 --- Point every XDG dir at a throwaway root and capture vim.notify.
 function M.setup_env()
     local root = vim.fn.tempname()
@@ -18,6 +20,7 @@ end
 --- Clear task, UI and notification state between tests.
 function M.reset()
     M.notes = {}
+    registered = {}
     local tasks = require('sarcina.tasks')
     tasks._jobs, tasks._plugins, tasks._order = {}, {}, {}
     tasks._running, tasks._started, tasks._callbacks = 0, false, {}
@@ -32,9 +35,9 @@ function M.reset()
     ui.close()
     ui._listeners = {}
     ui._dismissed = false
-    ui._delay_passed = true
     ui._seen_failed = 0
-    ui.show_delay = 250
+    ui._dirty, ui._want, ui._full = {}, false, false
+    ui.show = 'auto'
     ui.close_delay = 60000
 end
 
@@ -69,6 +72,16 @@ function M.lua(id, fn, extra) return vim.tbl_extend('force', { id = id, type = '
 
 function M.noop() end
 
+--- A git repo with one empty commit, for clones and builds. Returns its path.
+function M.make_repo()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, 'p')
+    vim.fn.system({ 'git', '-C', dir, 'init', '-q' })
+    local commit = { 'git', '-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q' }
+    vim.fn.system(vim.list_extend(commit, { '--allow-empty', '-m', 'init' }))
+    return dir
+end
+
 --- Create a plugin dir holding lua/<module>/init.lua for each `modules` entry (module = body).
 function M.plugin_dir(modules, root)
     local dir = root or vim.fn.tempname()
@@ -77,6 +90,16 @@ function M.plugin_dir(modules, root)
         vim.fn.writefile(vim.split(body, '\n'), dir .. '/lua/' .. module .. '/init.lua')
     end
     return dir
+end
+
+--- Register `plugins` ({ name, deps, tasks }) with the stats, one row each, as setup() does for the manifest.
+--- `append` adds to the ones registered before. A plugin's `timing` defaults to 'later'.
+function M.register(plugins, append)
+    if not append then registered = {} end
+    for _, plugin in ipairs(plugins) do
+        table.insert(registered, { name = plugin.name, timing = plugin.timing or 'later', spec = plugin })
+    end
+    require('sarcina.stats').register(registered)
 end
 
 --- Enqueue `plugins` ({ name, deps, tasks }), run to completion, and return the summary.

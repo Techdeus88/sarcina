@@ -1,6 +1,8 @@
 -- sarcina/executors.lua
 -- Task executors, keyed by task type. Each is `function(job, done, report)`.
 -- Call `done(ok, msg)` exactly once and `report(line)` to publish live output.
+-- A task that does real work, such as a clone or a build that is not up to date, sets `job.working` and
+-- calls `report()` with no line to say so.
 -- The runner in tasks.lua owns every status change, so executors never touch the UI state.
 
 local paths = require('sarcina.paths')
@@ -57,6 +59,8 @@ function M.git_clone(job, done, report)
     if not spec.repo then return done(false, 'no repo') end
     local dest = spec.dest or paths.install(job.plugin)
     if uv.fs_stat(dest) then return done(true, 'already installed') end
+    job.working = true
+    report()
     local staging = paths.staging(job.plugin)
     vim.fn.mkdir(vim.fn.fnamemodify(staging, ':h'), 'p')
     vim.fn.mkdir(vim.fn.fnamemodify(dest, ':h'), 'p')
@@ -196,6 +200,8 @@ local function per_commit(exec, needs_plugin)
         local record = paths.install(job.plugin) .. '/.git/sarcina-' .. job.id
         head_commit(job.plugin, function(commit)
             if commit and read_record(record) == commit then return done(true, 'up to date') end
+            job.working = true
+            report()
             if needs_plugin then add_to_rtp(job.plugin) end
             exec(job, function(ok, msg)
                 if ok and commit then write_record(record, commit) end

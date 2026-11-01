@@ -1,22 +1,27 @@
 local h = require('helpers')
-local tasks = require('sarcina.tasks')
 local executors = require('sarcina.executors')
+local tasks = require('sarcina.tasks')
 local ui = require('sarcina.ui')
 
 local tests = {}
 local function test(name, fn) table.insert(tests, { name, fn }) end
 
-executors.t_slow = function(_, done)
+-- A task that does real work: it says so and takes 150 ms.
+executors.t_work = function(job, done, report)
+    job.working = true
+    report()
     vim.defer_fn(function() done(true) end, 150)
 end
 
+-- A long task that never says it is working.
 executors.t_quiet = function(_, done)
     vim.defer_fn(function() done(true) end, 600)
 end
 
-executors.t_chatty = function(_, done, report)
+executors.t_chatty = function(job, done, report)
     local output = { 'short', string.rep('x', 200), string.rep('y', 90), 'tiny', string.rep('z', 41) }
     local i = 0
+    job.working = true
     local function step()
         i = i + 1
         if i > #output then return done(true) end
@@ -26,7 +31,13 @@ executors.t_chatty = function(_, done, report)
     step()
 end
 
+local function run(plugins, opts)
+    h.register(plugins)
+    return h.run(plugins, opts)
+end
+
 local function append_run(plugins)
+    h.register(plugins, true)
     for _, plugin in ipairs(plugins) do
         tasks.enqueue(plugin.name, plugin, { append = true })
     end
@@ -38,129 +49,92 @@ local function win_open() return ui._winid ~= nil and vim.api.nvim_win_is_valid(
 
 local function lines() return vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false) end
 
-local function title()
-    local text = vim.api.nvim_win_get_config(ui._winid).title
-    if type(text) == 'table' then
-        text = table.concat(
-            vim.tbl_map(function(chunk) return type(chunk) == 'table' and chunk[1] or chunk end, text)
-        )
-    end
-    return text
-end
+local function loaded(name) return { name = name, tasks = { h.lua('rtp', h.noop) } } end
 
 local function failing(name)
-    return {
-        name = name,
-        tasks = {
-            h.lua('x', function() error('no') end),
-        },
-    }
+    return { name = name, tasks = { h.lua('x', function() error('no') end) } }
 end
 
-test('rows keep enqueue order and failures get their own glyph', function()
-    local plugins = {}
-    for i = 1, 6 do
-        local fn = i == 3 and function() error('boom') end or h.noop
-        table.insert(plugins, { name = 'plugin' .. i, tasks = { h.lua('load', fn) } })
-    end
-    h.run(plugins)
-    ui.open()
-    local got = lines()
-    h.eq(#got, 6)
-    for i = 1, 6 do
-        h.ok(got[i]:find('plugin' .. i, 1, true), 'row ' .. i .. ' is ' .. got[i])
-    end
-    h.ok(vim.startswith(got[1], '✔'))
-    h.ok(vim.startswith(got[3], '✘'))
-    h.ok(got[3]:find('error: ', 1, true))
-end)
+local function working(name) return { name = name, tasks = { { id = 'a', type = 't_work' } } } end
 
-test('the panel shows a job as running while it runs', function()
-    ui.show_delay = 0
-    tasks.enqueue('slow', { tasks = { { id = 'a', type = 't_slow' } } })
-    tasks.run_all()
-    h.ok(vim.wait(100, win_open), 'panel never opened')
-    h.ok(vim.startswith(lines()[1], '▶'), lines()[1])
-    h.ok(tasks.wait(2000))
-    h.ok(vim.wait(200, function() return vim.startswith(lines()[1], '✔') end))
-end)
-
-test('the title counts finished jobs and failures', function()
-    h.run({ failing('a'), { name = 'b', tasks = { h.lua('y', h.noop), h.lua('z', h.noop) } } })
-    ui.open()
-    h.eq(title(), ' Sarcina 3/3 · 1 failed ')
-end)
-
-test('a failure opens the panel on its own', function()
-    h.run({ failing('a') })
+test('a failure opens the window on its own', function()
+    run({ failing('a') })
     h.ok(vim.wait(200, win_open))
 end)
 
-test('the panel opens when show_delay passes, even if no task reports anything', function()
-    tasks.enqueue('quiet', { tasks = { { id = 'a', type = 't_quiet' } } })
+test('a task that does real work opens the window', function()
+    h.register({ working('w') })
+    tasks.enqueue('w', working('w'))
     tasks.run_all()
-    h.ok(vim.wait(450, win_open), 'panel never opened while the task stayed silent')
+    h.ok(vim.wait(200, win_open), 'the window never opened')
     h.ok(tasks.wait(2000))
 end)
 
-test('the panel keeps its height while a running job reports lines of any length', function()
-    ui.show_delay = 0
+test('a long task that never says it works does not open the window', function()
+    h.register({ { name = 'q', tasks = { { id = 'a', type = 't_quiet' } } } })
+    tasks.enqueue('q', { tasks = { { id = 'a', type = 't_quiet' } } })
+    tasks.run_all()
+    vim.wait(450)
+    h.eq(win_open(), false)
+    h.ok(tasks.wait(2000))
+end)
+
+test('the window keeps its size while a running job reports lines of any length', function()
+    h.register({ { name = 'chatty', tasks = { { id = 'a', type = 't_chatty' } } } })
     tasks.enqueue('chatty', { tasks = { { id = 'a', type = 't_chatty' } } })
     tasks.run_all()
-    h.ok(vim.wait(500, win_open), 'panel never opened')
-    local heights, widest = {}, 0
+    h.ok(vim.wait(500, win_open), 'the window never opened')
+    local sizes, widest = {}, 0
     vim.wait(450, function()
         if win_open() then
-            heights[vim.api.nvim_win_get_config(ui._winid).height] = true
+            local config = vim.api.nvim_win_get_config(ui._winid)
+            sizes[config.width .. 'x' .. config.height] = true
             for _, line in ipairs(lines()) do
                 widest = math.max(widest, vim.fn.strdisplaywidth(line))
             end
         end
         return false
     end, 10)
-    h.eq(vim.tbl_count(heights), 1, 'heights seen: ' .. vim.inspect(vim.tbl_keys(heights)))
-    h.ok(
-        widest <= vim.api.nvim_win_get_config(ui._winid).width,
-        'a running row spilled past the window width'
-    )
+    h.eq(vim.tbl_count(sizes), 1, 'sizes seen: ' .. vim.inspect(vim.tbl_keys(sizes)))
+    h.ok(widest <= vim.api.nvim_win_get_config(ui._winid).width, 'a row spilled past the window width')
     h.ok(tasks.wait(2000))
 end)
 
-test('an appended run keeps earlier failures in the panel', function()
-    h.run({ failing('a') })
+test('an appended run keeps earlier failures in the window', function()
+    run({ failing('a') })
     h.ok(vim.wait(200, win_open))
-    append_run({ { name = 'b', tasks = { h.lua('y', h.noop) } } })
+    append_run({ loaded('b') })
     vim.wait(100)
     local text = table.concat(lines(), '\n')
-    h.ok(text:find('✘ a – x', 1, true), text)
-    h.ok(text:find('✔ b – y', 1, true), text)
+    h.ok(text:find('✘ a%s+later%s+failed'), text)
+    h.ok(text:find('✔ b%s+later%s+loaded'), text)
 end)
 
-test('with nothing running the cursor sits on the newest failure', function()
-    h.run({ failing('a'), { name = 'b', tasks = { h.lua('y', h.noop) } }, failing('c') })
+test('the cursor sits on the plugin at work, else on the last failed one', function()
+    run({ failing('a'), loaded('b'), failing('c') })
     ui.open()
-    h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 3)
+    h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 4)
 end)
 
-test('a clean appended run does not auto-close a panel that still shows a failure', function()
+test('a clean appended run does not auto-close a window that still shows a failure', function()
     ui.close_delay = 50
-    h.run({ failing('a') })
+    run({ failing('a') })
     h.ok(vim.wait(200, win_open))
-    append_run({ { name = 'b', tasks = { h.lua('y', h.noop) } } })
+    append_run({ loaded('b') })
     vim.wait(300)
-    h.ok(win_open(), 'the panel closed on top of an unseen failure')
+    h.ok(win_open(), 'the window closed on top of an unseen failure')
 end)
 
-test('a dismissed panel ignores a clean appended run but reopens for a new failure', function()
-    h.run({ failing('a') })
+test('a dismissed window ignores a clean appended run but reopens for a new failure', function()
+    run({ failing('a') })
     h.ok(vim.wait(200, win_open))
     ui.dismiss()
-    append_run({ { name = 'b', tasks = { h.lua('y', h.noop) } } })
+    append_run({ loaded('b') })
     vim.wait(300)
     h.eq(win_open(), false)
     append_run({ failing('c') })
-    h.ok(vim.wait(300, win_open), 'a new failure did not reopen the panel')
-    h.ok(title():find('2 failed', 1, true), title())
+    h.ok(vim.wait(300, win_open), 'a new failure did not reopen the window')
+    h.ok(lines()[1]:find('2 failed', 1, true), lines()[1])
 end)
 
 test('a normal run toasts one summary line', function()
@@ -185,23 +159,23 @@ test('debug events reach listeners but never become toasts', function()
     h.eq(h.notes, {})
 end)
 
-test('a quick clean run never opens the panel', function()
-    h.run({ { name = 'p', tasks = { h.lua('a', h.noop) } } })
+test('a quick clean run never opens the window', function()
+    run({ loaded('p') })
     vim.wait(400)
     h.eq(ui._winid, nil)
 end)
 
-test('closing the window dismisses the panel until the next run', function()
-    h.run({ failing('p') })
+test('closing the window dismisses it until the next run', function()
+    run({ failing('p') })
     h.ok(vim.wait(200, win_open))
     vim.api.nvim_win_close(ui._winid, true)
     h.eq(ui._dismissed, true)
-    h.run({ failing('p') })
-    h.ok(vim.wait(200, win_open), 'panel did not come back for the new run')
+    run({ failing('p') })
+    h.ok(vim.wait(200, win_open), 'the window did not come back for the new run')
 end)
 
-test('q dismisses the panel', function()
-    h.run({ failing('p') })
+test('q dismisses the window', function()
+    run({ failing('p') })
     h.ok(vim.wait(200, win_open))
     local map = vim.api.nvim_buf_call(ui._bufnr, function() return vim.fn.maparg('q', 'n', false, true) end)
     h.eq(map.buffer, 1)
@@ -210,14 +184,57 @@ test('q dismisses the panel', function()
     h.eq(ui._dismissed, true)
 end)
 
-test('a clean run closes the panel after close_delay', function()
-    ui.show_delay = 0
+test('a clean run closes the window after close_delay', function()
     ui.close_delay = 50
-    tasks.enqueue('slow', { tasks = { { id = 'a', type = 't_slow' } } })
+    h.register({ working('w') })
+    tasks.enqueue('w', working('w'))
     tasks.run_all()
-    h.ok(vim.wait(100, win_open))
+    h.ok(vim.wait(200, win_open))
     h.ok(tasks.wait(2000))
     h.ok(vim.wait(500, function() return not win_open() end))
+end)
+
+test('a window opened by hand stays after a clean run', function()
+    ui.close_delay = 50
+    run({ loaded('a') })
+    ui.open()
+    h.ok(win_open())
+    append_run({ loaded('b') })
+    vim.wait(300)
+    h.ok(win_open(), 'the window closed under the user')
+end)
+
+test('opening by hand goes into the window and says so when there is nothing to show', function()
+    ui.open()
+    h.ok(h.notified('No task activity yet'))
+    run({ loaded('a') })
+    ui.open()
+    h.eq(vim.api.nvim_get_current_win(), ui._winid)
+end)
+
+test('show = never keeps the window shut, even for a failure', function()
+    ui.configure({ show = 'never' })
+    run({ failing('a') })
+    vim.wait(200)
+    h.eq(win_open(), false)
+end)
+
+test('show = always opens the window when the startup run starts, even when it is clean', function()
+    ui.configure({ show = 'always' })
+    h.register({ loaded('a') })
+    tasks.enqueue('a', loaded('a'))
+    tasks.run_all(nil, { quiet = true })
+    h.ok(vim.wait(200, win_open), 'the window did not open at the start of the run')
+end)
+
+test('show falls back to auto for a value it does not know', function()
+    ui.configure({ show = 'sometimes' })
+    h.eq(ui.show, 'auto')
+    h.ok(h.notified('Unknown ui.show sometimes'))
+    ui.configure({ show = 'never' })
+    h.eq(ui.show, 'never')
+    ui.configure(nil)
+    h.eq(ui.show, 'auto')
 end)
 
 test('warn and warning both notify', function()

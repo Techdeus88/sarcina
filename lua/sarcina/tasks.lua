@@ -262,6 +262,7 @@ function run_job(plugin, job)
     job.status = 'running'
     job.error = nil
     job.output = nil
+    job.working = nil
     track.started(job)
     emit(job)
 
@@ -271,10 +272,11 @@ function run_job(plugin, job)
         settled = true
         vim.schedule(function() finish(plugin, job, ok, msg) end)
     end
+    -- Without a line it only tells the UI that the job changed, such as `job.working` being set.
     local function report(line)
         vim.schedule(function()
             if job.status == 'running' then
-                job.output = line
+                job.output = line or job.output
                 emit(job)
             end
         end)

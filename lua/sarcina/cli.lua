@@ -19,28 +19,14 @@ function subcommands.install(_)
     ui.emit('info', 'Resolving manifest and installing...')
     local manifest = require('sarcina.manifest').load()
     local deps = resolver.resolve(manifest)
+    require('sarcina.stats').register(deps)
     installer.install_all(deps)
 end
 
 function subcommands.sync(_) ui.emit('info', 'Sync (install + prune) not yet implemented') end
 
 function subcommands.stats(_)
-    local stats = require('sarcina.stats').get()
-    local startup = stats.startup_ms and string.format('startup %.0f ms', stats.startup_ms)
-        or 'startup pending'
-    ui.emit(
-        'info',
-        string.format(
-            '%d plugins · %d loaded · %d not loaded · %d now · %d later · %d triggered · %s',
-            stats.count,
-            stats.loaded,
-            stats.not_loaded,
-            stats.now,
-            stats.later,
-            stats.triggered,
-            startup
-        )
-    )
+    ui.emit('info', require('sarcina.window').summary(require('sarcina.stats').get()))
 end
 
 function subcommands.panel(_) ui.toggle() end

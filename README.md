@@ -1,6 +1,6 @@
 # sarcina
 
-A Neovim plugin manager built around a task engine. Each plugin expands into an ordered list of tasks (clone, build, runtimepath, config). The task panel shows what the engine is doing as it does it.
+A Neovim plugin manager built around a task engine. Each plugin expands into an ordered list of tasks (clone, build, runtimepath, config). A floating window shows each plugin's progress as the engine works.
 
 ## Layout
 
@@ -14,7 +14,7 @@ lua/sarcina/
 ├── main_module.lua   finds the module that a plugin's opts belong to
 ├── tasks.lua         task store and async runner; owns all task state
 ├── track.lua         stamps every task's created, started, ended and duration; keeps the session history
-├── stats.lua         the public numbers: count, loaded, now, later, triggered, startup_ms
+├── stats.lua         the public numbers, and one row per plugin: state, task 3 of 8, detail
 ├── executors.lua     one function per task type (git_clone, rtp, lua, cmd, shell, keymaps, trigger, make)
 ├── scheduler.lua     stubs and deferred loading for triggered plugins
 ├── keys.lua          parses `keys` entries into a lhs, an rhs, a mode and options
@@ -24,7 +24,8 @@ lua/sarcina/
 ├── installer.lua     queues a resolved manifest and runs it (:Sarcina install)
 ├── paths.lua         install and staging locations
 ├── schema.lua        manifest and task validation
-└── ui.lua            event bus and floating task panel
+├── ui.lua            event bus, toasts, and when the window opens
+└── window.lua        the floating window: a header, one row per plugin, a footer
 ```
 
 ## Usage
@@ -130,7 +131,7 @@ A spec with `event`, `ft`, `cmd` or `keys` is triggered: it loads when one fires
 - A triggered plugin only registers stubs for its triggers. When it is installed they exist as soon as `setup()` returns, so `nvim file.lua` wakes an `event` or `ft` trigger for its first buffer. The `load_trigger` row reads `waiting for :Telescope`.
 - A plugin that is not installed yet registers its stubs once it is cloned, after the first buffer was read. It then catches up and loads at once if a trigger already happened: a loaded buffer whose filetype matches an `ft` trigger, a file buffer whose name matches a `BufRead`, `BufReadPre`, `BufReadPost`, `BufEnter`, `BufWinEnter`, `BufAdd` or `BufNew` trigger, or a `VimEnter` or `UIEnter` that already fired. The plugin's own handlers replay for the first such buffer. Commands, keys and other events, such as `User` ones, can only be started by the user.
 - A plugin that is loading or loaded keeps no stubs, so registering it again, as `:Sarcina install` does, does not re-arm it.
-- The first trigger to fire removes every stub, then runs the plugin's `rtp`, `load` and `after` tasks through the task runner, so a failed config shows up in the panel like any other failure.
+- The first trigger to fire removes every stub, then runs the plugin's `rtp`, `load` and `after` tasks through the task runner, so a failed config shows up in the window like any other failure.
 - Triggered dependencies load first. A `now` or `later` plugin pulls its dependencies in at the same time, transitively.
 - Afterwards the trigger replays. A command runs again with its args, bang and range. A key is fed again. An event runs only the autocmds the plugin added, so other plugins' handlers do not fire twice.
 - `event` takes `'BufRead'` or `'User Foo'`, with an optional pattern after the event name.
@@ -164,6 +165,25 @@ vim.api.nvim_create_autocmd('User', {
 })
 ```
 
+### Rows
+
+`require('sarcina.stats').plugins()` returns one row per plugin in load order, and `plugin(name)` returns one row. A row is read from the tracked tasks, so it is always current.
+
+```lua
+{ name = 'telescope.nvim', timing = 'trigger', state = 'waiting', task = 2, tasks = 6,
+  detail = 'waiting for :Telescope', duration = 112.4 }
+```
+
+| Field | Is |
+| --- | --- |
+| `timing` | `now`, `later` or `trigger` |
+| `state` | `pending`, `installing`, `building`, `loading`, `waiting` (for its trigger), `loaded`, `blocked` or `failed` |
+| `task`, `tasks` | the plugin is at task `task` of `tasks`: its whole plan, with the tasks a trigger holds back counted. A task that never ran because it had nothing to do, such as the install of a plugin that is on disk, counts as done, and a loaded plugin reads `tasks` of `tasks` |
+| `detail` | the line that says more: git's or the build's latest output, the first line of an error, why a plugin is blocked, or what it waits for |
+| `duration` | milliseconds its tasks took in all, when they took any |
+
+An install of a plugin that is on disk, and a build whose commit did not change, never show as `installing` or `building`.
+
 To look at every tracked time, run `:lua vim.print(require('sarcina.stats').tasks())`.
 
 `require('sarcina.stats').tasks()` lists every task of the session with `plugin`, `id`, `type`, `status`, `attempts`, `note`, `error` and its `meta`, and with times in milliseconds since `setup()` began: `created`, `started`, `ended`, `duration` (end minus start) and `waited` (start minus creation, the time spent behind the install barrier or a dependency). A task that never ran has only `created`.
@@ -173,7 +193,7 @@ To look at every tracked time, run `:lua vim.print(require('sarcina.stats').task
 | Command | Does |
 | --- | --- |
 | `:Sarcina install` | resolve the manifest and run every plugin's tasks |
-| `:Sarcina panel` | toggle the task panel |
+| `:Sarcina panel` | toggle the window, and go into it |
 | `:Sarcina stats` | print the stats on one line |
 | `:Sarcina help` | list subcommands |
 
@@ -185,7 +205,7 @@ To look at every tracked time, run `:lua vim.print(require('sarcina.stats').task
 - If a task fails, the rest of that plugin's tasks and every plugin that depends on it are marked `skipped`.
 - A task with `retries = n` runs up to `n + 1` times before it counts as failed.
 - A task with `when = '<lua expression>'` is dropped from the queue when the expression is false.
-- Executors are `function(job, done, report)`. They call `done(ok, msg)` once and `report(line)` for live output. The runner owns every status change, so an executor cannot leave a task stuck in `running`.
+- Executors are `function(job, done, report)`. They call `done(ok, msg)` once and `report(line)` for live output. A task that does real work, such as a clone or a build that is not up to date, sets `job.working = true` and calls `report()` with no line, which is how the window knows to open. The runner owns every status change, so an executor cannot leave a task stuck in `running`.
 
 `tasks.enqueue(name, spec, { append = true })` and `tasks.run_all(cb, { append = true })` add to the job list instead of starting a new one, and the summary then counts only the jobs added since the last one. The scheduler uses this for the loads that triggers start.
 
@@ -193,18 +213,38 @@ Every job is stamped by `track` when it is created, started and finished: `creat
 
 Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.snapshot()` returns the jobs in queue order plus a count per status. Each change fires `ui.emit('task', job)`, and `ui.on('task', fn)` listens for them.
 
-## Task panel
+## Window
 
-The panel renders `tasks.snapshot()` and keeps no state of its own, so it cannot drift from the engine. It opens when a run lasts longer than `ui.show_delay` (250 ms) or when a failure appears, and closes `ui.close_delay` (3 s) after a run once nothing has failed. A failure keeps it open. `q` or closing the window dismisses it, and `:Sarcina panel` brings it back.
+One row per plugin, in load order, between a header and a footer:
 
-- A running row shows git's latest line cut to the window width, so the panel keeps one height while output streams. A finished row wraps its error in full.
-- A load that a trigger starts appends its rows to the current list instead of replacing it. Failures from earlier in the session stay on screen, and the plugin's `rtp` and `load` rows are added at the end of the list. With nothing running, the cursor sits on the newest failure.
-- A dismissed panel stays closed through later runs and reopens only for a failure it has not shown yet.
-- Starting a fresh run, such as `:Sarcina install` after a finished one, replaces the list.
+```
+ Sarcina · 12 of 55 plugins · 4 running · 1 failed
+ ✔ plenary.nvim      later    loaded      3 of 3 tasks   110ms
+ ▶ telescope.nvim    trigger  installing  1 of 6 tasks          Receiving objects: 45%
+ ○ blink.cmp         trigger  waiting     2 of 6 tasks          waiting for InsertEnter
+ ✘ avante.nvim       later    failed      2 of 3 tasks   120ms  make: command not found
+ ⊘ smart-splits.nvim later    blocked     1 of 3 tasks          dependency avante.nvim failed
+ 55 plugins · 25 loaded · 30 not loaded · 7 now · 18 later · 30 triggered · startup 83 ms
+ slowest: telescope.nvim 2.1s · avante.nvim 1.4s · nvim-treesitter 0.9s
+```
+
+The window reads the stats and keeps no task state, so it cannot drift from the engine. A row is redrawn when an event arrives for its plugin, and the footer is `stats.get()` plus the slowest plugins. It is centered, as wide as its content up to 80% of the editor, and scrolls beyond 80% of its height. Its size is fixed when it opens, so streaming output never moves it.
+
+It opens by itself on a first install (a clone), on a build that runs because the plugin's commit changed, and on a failure. A warm startup, where everything is installed and built, never opens it. `setup({ ui = { show = ... } })` changes that:
+
+| `show` | Opens by itself |
+| --- | --- |
+| `'auto'` (default) | on real work and on a failure |
+| `'always'` | at every startup |
+| `'never'` | never. Failures still toast |
+
+A window that opened by itself closes `ui.close_delay` (3 s) after a clean run. A failure keeps it open. `q` or closing it dismisses it until a failure it has not shown yet, and `:Sarcina panel` brings it back, goes into it, and keeps it open until you close it.
+
+A load that a trigger starts updates the plugin's row in place, and `ui.on('task', fn)` still hears every job change.
 
 ## Messages
 
-Only problems become toasts. `setup()` runs quietly, so a clean launch prints nothing and the panel carries the progress. A run with failures ends with one error line such as `2 done, 1 failed, 4 skipped`, counting only that run. `:Sarcina install` also prints a summary when it succeeds. The resolver's chatter, such as derived plugin names, goes out as `debug` events that only `ui.on('debug', fn)` listeners receive.
+Only problems become toasts. `setup()` runs quietly, so a clean launch prints nothing and the window carries the progress. A run with failures ends with one error line such as `2 done, 1 failed, 4 skipped`, counting only that run. `:Sarcina install` also prints a summary when it succeeds. The resolver's chatter, such as derived plugin names, goes out as `debug` events that only `ui.on('debug', fn)` listeners receive.
 
 ## Development
 

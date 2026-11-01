@@ -6,6 +6,7 @@
 local M = {}
 
 local history = {}
+local by_plugin = {}
 
 local function ms(from, to) return (to - from) / 1e6 end
 
@@ -13,6 +14,8 @@ local function ms(from, to) return (to - from) / 1e6 end
 function M.created(job)
     job.created = vim.uv.hrtime()
     table.insert(history, job)
+    by_plugin[job.plugin] = by_plugin[job.plugin] or {}
+    table.insert(by_plugin[job.plugin], job)
 end
 
 --- A job began running. A retry keeps the first start.
@@ -26,6 +29,9 @@ end
 
 --- Every job of the session, as the live tables.
 function M.history() return history end
+
+--- The jobs of one plugin in creation order, as the live tables.
+function M.jobs_of(name) return by_plugin[name] or {} end
 
 --- One copy per job, with times in ms since `origin` (an hrtime). A job that never ran has only `created`.
 function M.records(origin)
@@ -56,6 +62,8 @@ function M.records(origin)
 end
 
 --- Forget the history. For tests.
-function M._reset() history = {} end
+function M._reset()
+    history, by_plugin = {}, {}
+end
 
 return M

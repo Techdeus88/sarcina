@@ -96,6 +96,16 @@ test('the history survives a fresh run, which replaces the job list', function()
     h.eq(#track.history(), 2)
 end)
 
+test('the jobs of one plugin come back in creation order, and an unknown plugin has none', function()
+    h.run({
+        { name = 'one', tasks = { h.lua('a', h.noop), h.lua('b', h.noop) } },
+        { name = 'two', tasks = { h.lua('c', h.noop) } },
+    })
+    h.eq(h.ids(track.jobs_of('one')), { 'a', 'b' })
+    h.eq(h.ids(track.jobs_of('two')), { 'c' })
+    h.eq(track.jobs_of('none'), {})
+end)
+
 test('tasks that run inline are tracked too', function()
     tasks.run_inline('p', { tasks = { h.lua('a', h.noop) } })
     local record = find(track.records(vim.uv.hrtime() - 1e9), 'p', 'a')
