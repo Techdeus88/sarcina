@@ -25,7 +25,7 @@ lua/sarcina/
 ├── paths.lua         install and staging locations
 ├── schema.lua        manifest and task validation
 ├── ui.lua            event bus, toasts, and when the window opens
-└── window.lua        the floating window: a header, one row per plugin, a footer
+└── window.lua        the floating window: the plugin list and a pane with the details of one
 ```
 
 ## Usage
@@ -56,7 +56,7 @@ return {
 | `name` | plugin name; derived from the repo when missing |
 | `deps` | plugins that must finish first |
 | `load` | when the plugin loads: `'now'`, `'now_if_args'` or `'later'` (the default). `lazy = false` means `'now'` |
-| `init`, `build`, `after` | `init` runs right after the install, `build` after that, and `after` once the plugin has loaded. A function is called with `plugin = { name, dir }`. A string is a Lua chunk, except that a `build` string is a shell command run in the plugin directory (`build = 'make'`), and any string starting with `:` is an Ex command (`build = ':TSUpdate'`). `build` runs only after a fresh clone or when the plugin's commit changes |
+| `init`, `build`, `after` | `init` runs right after the install, `build` after that, and `after` once the plugin has loaded. A function is called with `plugin = { name, dir }`; a `build` function may take a second parameter, `done`, to run async (see below). A string is a Lua chunk, except that a `build` string is a shell command run in the plugin directory (`build = 'make'`), and any string starting with `:` is an Ex command (`build = ':TSUpdate'`). `build` runs only after a fresh clone or when the plugin's commit changes |
 | `config` | called as `config(plugin, opts)` with `plugin = { name, dir }` |
 | `opts` | a table, or a `function(plugin, opts)` that returns one or fills in the empty table it is given. Handed to `config(plugin, opts)`, or to `require(module).setup(opts)` when there is no `config` |
 | `main` | the module to require; found from the plugin name when missing |
@@ -66,6 +66,18 @@ return {
 Every plugin is cloned to `stdpath('data')/sarcina/plugins/<name>`. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs. For a `now` plugin that is inside `setup()`, so Neovim sources its `plugin/` files in its own startup pass.
 
 A `build` that succeeds records the plugin's commit in `.git/sarcina-build` inside the plugin directory, and later runs skip it while `HEAD` still matches (`build` shows `up to date`). A new commit from an update or a manual `git pull` runs it again. A build that fails leaves no record, so it runs again on the next launch. To force a rebuild, delete that file.
+
+A function `build` that declares a second parameter is async: `build = function(plugin, done) ... end`. It gets `done(ok, msg)`, and the build stays `building` until it calls it, so the plugin's `rtp` and config wait and the commit is recorded only then. Use it for a build that runs in the background, such as a process or a task that finishes later:
+
+```lua
+build = function(_, done)
+    require('blink.cmp'):build()
+        :map(function() done(true) end)
+        :catch(function(err) done(false, tostring(err)) end)
+end,
+```
+
+`done` may be called from a callback, and `done(false, msg)` fails the build with `msg`. An error raised before `done` is called also fails it. A build that never calls `done` keeps the plugin, and anything that depends on it, waiting, because there is no timeout. A build with no second parameter finishes when it returns.
 
 A function or Ex command `build` finds the plugin on `runtimepath`, so it can call the plugin's autoload functions and commands. Builds always run after the UI is up, when the plugin's `plugin/` files can be sourced, even for a `now` plugin.
 
@@ -184,6 +196,8 @@ vim.api.nvim_create_autocmd('User', {
 
 An install of a plugin that is on disk, and a build whose commit did not change, never show as `installing` or `building`.
 
+`require('sarcina.stats').steps(name)` lists the tasks of one plugin's plan in order, each with `id`, `status` (`pending`, `running`, `done`, `failed` or `skipped`), `duration`, `note`, `output` and the first line of its `error`. A task that was never created counts as `done` with the note `not needed` when a later one ran, as an install of what is on disk does, and as `pending` when it is still to come, as the tasks a trigger holds back are. `require('sarcina.stats').spec(name)` returns the live `{ name, timing, spec }` of a plugin; `require('sarcina').get` hands out copies.
+
 To look at every tracked time, run `:lua vim.print(require('sarcina.stats').tasks())`.
 
 `require('sarcina.stats').tasks()` lists every task of the session with `plugin`, `id`, `type`, `status`, `attempts`, `note`, `error` and its `meta`, and with times in milliseconds since `setup()` began: `created`, `started`, `ended`, `duration` (end minus start) and `waited` (start minus creation, the time spent behind the install barrier or a dependency). A task that never ran has only `created`.
@@ -195,7 +209,7 @@ require('sarcina').get()        -- every plugin: { { name = 'plenary.nvim', timi
 require('sarcina').get('mini.nvim')
 ```
 
-`get()` lists the plugins in the resolver's order, dependencies first, which is a stable order. For the order they actually loaded in, read `stats.plugins()`. `timing` is `now`, `later` or `trigger`, after dependency promotion. Each `spec` is the complete one the engine runs from: the name is derived from `repo` when missing, `deps` are plain names, `triggers` are normalized, and `tasks` are generated. A name sarcina does not know gives `nil`, and before `setup()` has run the list is empty.
+`get()` lists the plugins in the resolver's order, dependencies first, which is a stable order. For the order they actually loaded in, read `stats.plugins()`. `timing` is `now`, `later` or `trigger`, after dependency promotion. Each `spec` is the complete one the engine runs from: the name is derived from `repo` when missing, `deps` are plain names, `triggers` are normalized, and `tasks` are generated. `origin` is the spec file the plugin was loaded from, unless the spec sets its own. A name sarcina does not know gives `nil`, and before `setup()` has run the list is empty.
 
 The results are copies, so changing one changes nothing the engine runs. A spec holds your functions, such as `config`, so it does not survive `vim.json.encode`.
 
@@ -228,22 +242,46 @@ Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.sn
 
 ## Window
 
-One row per plugin between a header and a footer, in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. So `now` plugins that are installed come first, since they load before the UI, then the `later` ones as they finish, then triggered ones as they fire.
+The window is 80% of the editor wide and 80% tall, centered. On the left is the list of plugins, on the right the details of the one under the cursor:
 
 ```
- Sarcina · 12 of 55 plugins · 4 running · 1 failed
- ✔ plenary.nvim      later    loaded      3 of 3 tasks   110ms
- ▶ telescope.nvim    trigger  installing  1 of 6 tasks          Receiving objects: 45%
- ○ blink.cmp         trigger  waiting     2 of 6 tasks          waiting for InsertEnter
- ✘ avante.nvim       later    failed      2 of 3 tasks   120ms  make: command not found
- ⊘ smart-splits.nvim later    blocked     1 of 3 tasks          dependency avante.nvim failed
- 55 plugins · 25 loaded · 30 not loaded · 7 now · 18 later · 30 triggered · startup 83 ms
- slowest: telescope.nvim 2.1s · avante.nvim 1.4s · nvim-treesitter 0.9s
+╭ Sarcina · 12 of 55 plugins · 1 failed ──────────────╮╭ avante.nvim ─────────────────────────────────╮
+│ ✔ plenary.nvim   later   loaded  3 of 3 tasks 110ms ││ state     ✘ failed                           │
+│ ▶ telescope.nvim trigger installing 1 of 6 tasks    ││ tasks     2 of 3 tasks · 120ms               │
+│ ○ blink.cmp      trigger waiting 2 of 6 tasks       ││ timing    later                              │
+│ ✘ avante.nvim    later   failed  2 of 3 tasks 120ms ││ src       yetone/avante.nvim                 │
+│ ⊘ smart-splits   later   blocked 1 of 3 tasks       ││ path      ~/.local/share/nvim/sarcina/…      │
+│ 55 plugins · 25 loaded · 30 not loaded · 7 now      ││ rev       5e4e310                            │
+│ · 18 later · 30 triggered · startup 83 ms           ││ deps      plenary.nvim                       │
+│ slowest: telescope.nvim 2.1s · avante.nvim 1.4s     ││ origin    ~/.config/nvim/lua/plugins/ai.lua  │
+╰──────────────────────────────────── q close ────────╯│ detail    make: command not found            │
+                                                       │                                              │
+                                                       │ ✔ install   104ms already installed          │
+                                                       │ ✘ build      12ms make: command not found    │
+                                                       │ ⊘ rtp                                        │
+                                                       ╰──────────────────────────────────────────────╯
 ```
 
-The time on a row is the run time of all that plugin's tasks added up (clone, build, `rtp`, config, and the rest), not the load alone. A task counts when it ends, and time spent waiting behind the install barrier or a dependency does not. For one task at a time, run `:lua vim.print(require('sarcina.stats').tasks())`.
+**The list** has one row per plugin, in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. So installed `now` plugins come first, since they load before the UI, then the `later` ones as they finish, then triggered ones as they fire. Every row says where the plugin is in its tasks (`3 of 8 tasks`) and how long its tasks took. The footer is `stats.get()` plus the slowest plugins, wrapped to the width of the list.
 
-The window reads the stats and keeps no task state, so it cannot drift from the engine. A row is redrawn when an event arrives for its plugin, and the footer is `stats.get()` plus the slowest plugins. It is centered, as wide as its content up to 80% of the editor, and scrolls beyond 80% of its height. Its size is fixed when it opens, so streaming output never moves it.
+**The details** show the plugin under the cursor and follow it. While you are not in the window the cursor follows the plugin that is at work, or the last one that failed. Each key shows only when there is something to say:
+
+| Key | Is |
+| --- | --- |
+| `state`, `tasks`, `timing` | what the row says, with the plugin's total time |
+| `src`, `path` | the `repo` as written, and the directory it is cloned to (`dest`, or the default) |
+| `rev` | the short commit in that directory, read in the background |
+| `deps`, `triggers`, `armed` | what it needs, what loads it, and whether that is still `waiting`, `loading`, `loaded` or `failed` |
+| `origin` | the spec file it came from |
+| `detail` | live output, the first line of an error, why it is blocked, or what it waits for |
+
+Below them is one line per task of the plugin's plan with that task's own time, which is how to tell what the time on a row went to.
+
+With less room than about 105 columns the list takes the whole width and the details pane goes, and the rows keep their detail text. The columns of a row give way to the width in the same order: the detail text, then the state word (the glyph still says it), then the name is cut with `…`. Both panes follow a resize.
+
+The time on a row is the run time of all that plugin's tasks added up, not the load alone. A task counts when it ends, and time spent waiting behind the install barrier or a dependency does not.
+
+The window reads the stats and keeps no task state, so it cannot drift from the engine. An event redraws the row of its plugin, the header and the footer, and the details when they show that plugin. The size is fixed when the window opens, so streaming output never moves it.
 
 It opens by itself on a first install (a clone), on a build that runs because the plugin's commit changed, and on a failure. A warm startup, where everything is installed and built, never opens it. `setup({ ui = { show = ... } })` changes that:
 
@@ -253,7 +291,7 @@ It opens by itself on a first install (a clone), on a build that runs because th
 | `'always'` | at every startup |
 | `'never'` | never. Failures still toast |
 
-A window that opened by itself closes `ui.close_delay` (3 s) after a clean run. A failure keeps it open. `q` or closing it dismisses it until a failure it has not shown yet, and `:Sarcina panel` brings it back, goes into it, and keeps it open until you close it.
+A window that opened by itself closes `ui.close_delay` (3 s) after a clean run. A failure keeps it open. `q` or closing the list dismisses both panes until a failure it has not shown yet, and `:Sarcina panel` brings it back, goes into the list, and keeps it open until you close it.
 
 A load that a trigger starts updates the plugin's row in place, and `ui.on('task', fn)` still hears every job change.
 

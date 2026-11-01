@@ -142,6 +142,84 @@ test('an Ex command build is gated by the commit too', function()
     h.eq(runs, 1)
 end)
 
+local function record_of(name) return paths.install(name) .. '/.git/sarcina-build' end
+
+-- Starts a run of one plugin and returns once its build is running.
+local function start_run(spec_plugin)
+    require('sarcina.tasks').enqueue(spec_plugin.name, spec_plugin)
+    require('sarcina.tasks').run_all(nil, { quiet = true })
+    h.ok(vim.wait(2000, function() return h.job(spec_plugin.name, 'build').status == 'running' end, 5))
+end
+
+test('a build that takes done runs until it calls it, and only then records the commit', function()
+    local release
+    local spec = {
+        repo = make_repo(),
+        build = function(_, done) release = done end,
+    }
+    local async = plugin('asyncbuild.nvim', spec)
+    start_run(async)
+    h.ok(vim.wait(2000, function() return release ~= nil end, 5), 'the build function never ran')
+    h.eq(h.job('asyncbuild.nvim', 'rtp').status, 'pending')
+    h.eq(vim.uv.fs_stat(record_of('asyncbuild.nvim')), nil)
+    release(true)
+    h.ok(require('sarcina.tasks').wait(2000))
+    h.eq(h.job('asyncbuild.nvim', 'build').status, 'done')
+    h.eq(h.job('asyncbuild.nvim', 'rtp').status, 'done')
+    h.eq(
+        vim.fn.readfile(record_of('asyncbuild.nvim'))[1],
+        vim.trim(vim.fn.system({
+            'git',
+            '-C',
+            paths.install('asyncbuild.nvim'),
+            'rev-parse',
+            'HEAD',
+        }))
+    )
+end)
+
+test('a build may call done from a libuv callback, as a finished process does', function()
+    local spec = {
+        repo = make_repo(),
+        build = function(_, done)
+            local timer = vim.uv.new_timer()
+            timer:start(30, 0, function()
+                timer:close()
+                done(true)
+            end)
+        end,
+    }
+    h.eq(h.run({ plugin('fastasync.nvim', spec) }).failed, 0)
+    h.eq(h.job('fastasync.nvim', 'build').status, 'done')
+    h.ok(vim.uv.fs_stat(record_of('fastasync.nvim')), 'no record after the build')
+end)
+
+test('done(false, message) fails the build, leaves no record, and skips the rest', function()
+    local spec = { repo = make_repo(), build = function(_, done) done(false, 'cargo exploded') end }
+    h.eq(h.run({ plugin('asyncfail.nvim', spec) }).failed, 1)
+    h.eq(h.job('asyncfail.nvim', 'build').error, 'cargo exploded')
+    h.eq(h.job('asyncfail.nvim', 'rtp').status, 'skipped')
+    h.eq(vim.uv.fs_stat(record_of('asyncfail.nvim')), nil)
+end)
+
+test('a build that takes done and raises fails the job instead of hanging', function()
+    local spec = {
+        repo = make_repo(),
+        build = function(_, done)
+            if done then error('before done', 0) end
+        end,
+    }
+    h.eq(h.run({ plugin('asyncraise.nvim', spec) }).failed, 1)
+    h.eq(h.job('asyncraise.nvim', 'build').error, 'before done')
+end)
+
+test('a build with one parameter stays synchronous and gets the plugin', function()
+    local seen
+    local spec = { repo = make_repo(), build = function(p) seen = { p.name, p.dir } end }
+    h.eq(h.run({ plugin('syncbuild.nvim', spec) }).failed, 0)
+    h.eq(seen, { 'syncbuild.nvim', paths.install('syncbuild.nvim') })
+end)
+
 test('a failed clone is reported, cleaned up, and stops the plugin', function()
     local summary = h.run({ plugin('ghost.nvim', { repo = vim.fn.tempname() .. '/missing' }) })
     h.eq(summary, { total = 2, done = 0, failed = 1, skipped = 1 })

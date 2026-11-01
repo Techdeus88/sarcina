@@ -148,6 +148,10 @@ local function resolve_opts(opts, plugin)
     return returned
 end
 
+-- A build function that declares a second parameter is async: it gets `done(ok, msg)` and the job runs
+-- until it is called. Any other function, and every other lua task, finishes when it returns.
+local function takes_done(job, fn) return job.id == 'build' and debug.getinfo(fn, 'u').nparams >= 2 end
+
 -- Calls `spec.fn`, or the compiled `spec.script`, as fn({ name, dir }, opts).
 function M.lua(job, done)
     local spec = job.spec
@@ -158,6 +162,11 @@ function M.lua(job, done)
         if not fn then return done(false, err) end
     end
     local plugin = { name = job.plugin, dir = paths.install(job.plugin) }
+    if spec.fn and takes_done(job, fn) then
+        local ok, err = pcall(fn, plugin, done)
+        if not ok then done(false, err) end
+        return
+    end
     local ok, err = pcall(function() fn(plugin, resolve_opts(spec.opts, plugin)) end)
     if ok then
         done(true)

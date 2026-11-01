@@ -290,6 +290,65 @@ test('a failed task fails its row with the error, and a dependent of it is block
     h.eq({ row.state, row.task, row.tasks, row.detail }, { 'blocked', 0, 1, 'dependency stbad failed' })
 end)
 
+local function step_list(name)
+    return vim.tbl_map(function(step) return step.id .. ':' .. step.status end, stats.steps(name))
+end
+
+test('stats.spec returns the live resolved entry of a plugin, or nil', function()
+    stats.register(resolver.resolve({ { name = 'stspec', repo = 'x/stspec' } }))
+    local entry = stats.spec('stspec')
+    h.eq({ entry.name, entry.timing, entry.spec.repo }, { 'stspec', 'later', 'x/stspec' })
+    h.eq(stats.spec('stnone'), nil)
+end)
+
+test(
+    'steps list a fresh plan as pending, and an installed plugin counts its install as not needed',
+    function()
+        stats.register(resolver.resolve({ { name = 'stfresh.nvim', repo = 'x/stfresh', opts = {} } }))
+        h.eq(step_list('stfresh.nvim'), { 'install:pending', 'rtp:pending', 'load:pending' })
+        h.eq(stats.steps('stnone'), nil)
+        installed('stinst.nvim', 'stinst')
+        begin({ { name = 'stinst.nvim', repo = 'x/stinst', opts = {} } })
+        local steps = stats.steps('stinst.nvim')
+        h.eq({ steps[1].status, steps[1].note }, { 'done', 'not needed' })
+        h.eq({ steps[2].status, steps[3].status }, { 'pending', 'pending' })
+        h.ok(tasks.wait(2000))
+        steps = stats.steps('stinst.nvim')
+        h.eq(step_list('stinst.nvim'), { 'install:done', 'rtp:done', 'load:done' })
+        h.ok(steps[2].duration ~= nil and steps[3].duration ~= nil, 'a task that ran has a duration')
+    end
+)
+
+test('steps of a waiting triggered plugin have the trigger done and the deferred tasks pending', function()
+    installed('stwait.nvim', 'stwait')
+    begin({ { name = 'stwait.nvim', repo = 'x/stwait', cmd = 'StatsStepsCmd', opts = {} } })
+    h.eq(step_list('stwait.nvim'), { 'install:done', 'load_trigger:done', 'rtp:pending', 'load:pending' })
+    h.eq(stats.steps('stwait.nvim')[2].note, 'waiting for :StatsStepsCmd')
+end)
+
+test('steps show a failed task with its error line and the tasks skipped after it', function()
+    local bad = {
+        name = 'stfailsteps',
+        tasks = { h.lua('rtp', h.noop), h.lua('load', function() error('boom') end), h.lua('after', h.noop) },
+    }
+    h.register({ bad })
+    h.run({ bad })
+    local steps = stats.steps('stfailsteps')
+    h.eq(step_list('stfailsteps'), { 'rtp:done', 'load:failed', 'after:skipped' })
+    h.eq({ steps[2].error, steps[3].note }, { 'boom', 'load failed' })
+end)
+
+test('steps show the output of a running task', function()
+    local plugin = { name = 'stoutput', tasks = { { id = 'install', type = 's_hold' } } }
+    h.register({ plugin })
+    tasks.enqueue('stoutput', plugin)
+    tasks.run_all()
+    h.ok(vim.wait(500, function() return stats.steps('stoutput')[1].output == 'cloning' end))
+    h.eq(stats.steps('stoutput')[1].status, 'running')
+    releases.stoutput()
+    h.ok(tasks.wait(2000))
+end)
+
 -- Runs a real startup in a child Neovim and prints the stats once the startup run is done.
 local function run_child()
     local script = vim.fn.tempname() .. '.lua'

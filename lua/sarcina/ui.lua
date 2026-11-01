@@ -1,7 +1,8 @@
 -- sarcina/ui.lua
 -- Event bus and the floating window for Sarcina.
--- The window is a pure view of the stats (see window.lua). This module decides when it opens and which
--- plugins to redraw, and keeps no task state of its own.
+-- The window is a pure view of the stats (see window.lua): a list of plugins and, when there is room, a
+-- pane with the details of the selected one. This module decides when it opens and which plugins to
+-- redraw, owns the two windows, and keeps no task state of its own.
 -- Events: "info" | "warn" | "warning" | "error" (strings, shown as toasts), "debug" (string, listeners only),
 -- "task" (job), "start", "done" (summary).
 
@@ -12,8 +13,10 @@ M.close_delay = 3000
 M.show = 'auto'
 
 M._listeners = {}
-M._bufnr = nil
+M._bufnr = nil -- the list
 M._winid = nil
+M._detail_bufnr = nil
+M._detail_winid = nil
 M._dismissed = false
 M._pinned = false -- opened by hand, so a clean run does not close it
 M._seen_failed = 0
@@ -39,6 +42,8 @@ local function buf_valid() return M._bufnr ~= nil and vim.api.nvim_buf_is_valid(
 
 local function win_valid() return M._winid ~= nil and vim.api.nvim_win_is_valid(M._winid) end
 
+local function detail_valid() return M._detail_winid ~= nil and vim.api.nvim_win_is_valid(M._detail_winid) end
+
 --- Read the `ui` options of setup().
 function M.configure(opts)
     local show = opts and opts.show or 'auto'
@@ -49,10 +54,63 @@ function M.configure(opts)
     M.show = show
 end
 
--- Puts the cursor on the plugin at work. After the window opened, it leaves alone a user who is in it.
-local function follow(opened)
-    if not opened and vim.api.nvim_get_current_win() == M._winid then return end
-    vim.api.nvim_win_set_cursor(M._winid, { window().target(), 0 })
+-- Draws the details of the selected plugin and names the details window after it.
+local function show_details()
+    if not detail_valid() then return end
+    local name = window().draw_details(M._detail_bufnr)
+    vim.api.nvim_win_set_config(M._detail_winid, { title = ' ' .. (name or '') .. ' ', title_pos = 'left' })
+end
+
+-- Puts the cursor on the plugin at work. A user who is in the window keeps their plugin: after the rows
+-- moved, the cursor goes back to it. The details are drawn again when the plugin shown changed, or when
+-- `dirty` is true or has an event for it.
+local function follow(opened, dirty)
+    local before = window().selected()
+    if not opened and vim.api.nvim_get_current_win() == M._winid then
+        local line = window().line(before)
+        if line then vim.api.nvim_win_set_cursor(M._winid, { line, 0 }) end
+    else
+        local line = window().target()
+        vim.api.nvim_win_set_cursor(M._winid, { line, 0 })
+        window().select(line)
+    end
+    local now = window().selected()
+    if opened or dirty == true or now ~= before or (dirty and dirty[now]) then show_details() end
+end
+
+local function close_details()
+    if detail_valid() then pcall(vim.api.nvim_win_close, M._detail_winid, true) end
+    if M._detail_bufnr and vim.api.nvim_buf_is_valid(M._detail_bufnr) then
+        pcall(vim.api.nvim_buf_delete, M._detail_bufnr, { force = true })
+    end
+    M._detail_bufnr, M._detail_winid = nil, nil
+end
+
+local function open_details(config)
+    M._detail_bufnr = vim.api.nvim_create_buf(false, true)
+    vim.bo[M._detail_bufnr].bufhidden = 'wipe'
+    vim.bo[M._detail_bufnr].filetype = 'sarcina'
+    local opts = vim.tbl_extend('force', config, {
+        style = 'minimal',
+        border = 'rounded',
+        focusable = false,
+        noautocmd = true,
+    })
+    M._detail_winid = vim.api.nvim_open_win(M._detail_bufnr, false, opts)
+    local wo = vim.wo[M._detail_winid]
+    wo.wrap, wo.linebreak, wo.breakindent, wo.breakindentopt = true, true, true, 'shift:10'
+end
+
+-- Puts both windows where the last full draw says: the details one comes and goes with the room for it.
+local function apply_config()
+    local config = window().config()
+    vim.api.nvim_win_set_config(M._winid, config.list)
+    if not config.detail then return close_details() end
+    if detail_valid() then
+        vim.api.nvim_win_set_config(M._detail_winid, config.detail)
+    else
+        open_details(config.detail)
+    end
 end
 
 local function ensure_buffer()
@@ -62,12 +120,21 @@ local function ensure_buffer()
     vim.bo[M._bufnr].bufhidden = 'wipe'
     vim.bo[M._bufnr].filetype = 'sarcina'
     vim.keymap.set('n', 'q', M.dismiss, { buffer = M._bufnr, nowait = true, desc = 'Close Sarcina window' })
+    vim.api.nvim_create_autocmd('CursorMoved', {
+        buffer = M._bufnr,
+        callback = function()
+            if not win_valid() then return end
+            window().select(vim.api.nvim_win_get_cursor(M._winid)[1])
+            show_details()
+        end,
+    })
 end
 
 local function open_window(enter)
     ensure_buffer()
     window().draw(M._bufnr)
-    local opts = vim.tbl_extend('force', window().config(), {
+    local config = window().config()
+    local opts = vim.tbl_extend('force', config.list, {
         style = 'minimal',
         border = 'rounded',
         footer = ' q close ',
@@ -77,6 +144,7 @@ local function open_window(enter)
     M._winid = vim.api.nvim_open_win(M._bufnr, enter, opts)
     vim.wo[M._winid].wrap = false
     vim.wo[M._winid].cursorline = true
+    if config.detail then open_details(config.detail) end
     vim.api.nvim_create_autocmd('WinClosed', {
         pattern = tostring(M._winid),
         once = true,
@@ -87,6 +155,8 @@ local function open_window(enter)
             end
             M._winid = nil
             M._pinned = false
+            close_details()
+            window().closed()
         end,
     })
     M._seen_failed = snapshot().counts.failed
@@ -115,9 +185,9 @@ function M._flush()
     else
         redrawn = window().refresh(M._bufnr, dirty)
     end
-    if redrawn then vim.api.nvim_win_set_config(M._winid, window().config()) end
+    if redrawn then apply_config() end
     M._seen_failed = failed
-    follow()
+    follow(false, redrawn or dirty)
 end
 
 local function schedule_flush()
@@ -139,6 +209,7 @@ function M._on_start(info)
     if fresh then
         M._dismissed = false
         M._seen_failed = 0
+        window().forget()
         if M.show == 'always' then M._want = true end
     end
     schedule_flush()
@@ -189,8 +260,9 @@ function M.open()
     M._pinned = true
     if win_valid() then
         window().draw(M._bufnr)
-        vim.api.nvim_win_set_config(M._winid, window().config())
+        apply_config()
         vim.api.nvim_set_current_win(M._winid)
+        follow(true)
     else
         open_window(true)
     end
@@ -200,6 +272,8 @@ function M.close()
     M._closing = true
     if win_valid() then pcall(vim.api.nvim_win_close, M._winid, true) end
     if buf_valid() then pcall(vim.api.nvim_buf_delete, M._bufnr, { force = true }) end
+    close_details()
+    window().closed()
     M._closing = false
     M._bufnr, M._winid = nil, nil
     M._pinned = false

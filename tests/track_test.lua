@@ -6,8 +6,18 @@ local track = require('sarcina.track')
 local tests = {}
 local function test(name, fn) table.insert(tests, { name, fn }) end
 
+-- Calls `fn` once `ms` have really passed. A bare timer can fire early when libuv's loop time is stale.
+local function after(ms, fn)
+    local from = vim.uv.hrtime()
+    local function poll()
+        if (vim.uv.hrtime() - from) / 1e6 >= ms then return fn() end
+        vim.defer_fn(poll, 2)
+    end
+    poll()
+end
+
 executors.t_wait = function(_, done)
-    vim.defer_fn(function() done(true) end, 30)
+    after(30, function() done(true) end)
 end
 
 local function find(records, plugin, id)
@@ -43,10 +53,10 @@ test('a retried task keeps its first start and its duration spans both attempts'
     executors.t_flaky = function(job, done)
         attempts = attempts + 1
         first = first or job.started
-        vim.defer_fn(function()
+        after(20, function()
             if attempts == 1 then return done(false, 'once') end
             done(true)
-        end, 20)
+        end)
     end
     h.run({ { name = 'p', tasks = { { id = 'a', type = 't_flaky', retries = 1 } } } })
     local job = h.job('p', 'a')
@@ -79,7 +89,7 @@ end)
 
 test('a task held behind the install barrier records how long it waited', function()
     executors.t_slow_install = function(_, done)
-        vim.defer_fn(function() done(true) end, 60)
+        after(60, function() done(true) end)
     end
     h.run({
         { name = 'a', tasks = { { id = 'install', type = 't_slow_install', phase = 'install' } } },

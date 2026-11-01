@@ -49,11 +49,11 @@ local function collect_specs_from_dirs(dirs)
     for _, file in ipairs(spec_files(dirs)) do
         local ok, data = pcall(dofile, file)
         if ok and data then
-            if is_list(data) then
-                vim.list_extend(specs, data)
-            else
-                table.insert(specs, data)
+            local found = is_list(data) and data or { data }
+            for _, spec in ipairs(found) do
+                if type(spec) == 'table' then spec.origin = spec.origin or file end
             end
+            vim.list_extend(specs, found)
         else
             ui.emit('error', string.format('Failed to load spec file %s: %s', file, data or 'unknown error'))
         end

@@ -30,6 +30,21 @@ test('a spec directory nested inside another loads its files once', function()
     h.eq(specs[1].repo, 'x/nested.nvim')
 end)
 
+test('a spec carries the file it was loaded from as origin', function()
+    local dir = spec_dir()
+    local list, single = dir .. '/manifest_origin_list.lua', dir .. '/manifest_origin_single.lua'
+    vim.fn.writefile({ "return { { 'x/a.nvim' }, { 'x/b.nvim', origin = 'mine' } }" }, list)
+    vim.fn.writefile({ "return { repo = 'x/c.nvim' }" }, single)
+    local specs = manifest.load({ spec_paths = { dir } })
+    vim.fn.delete(list)
+    vim.fn.delete(single)
+    local origin = {}
+    for _, spec in ipairs(specs) do
+        origin[spec.repo] = spec.origin
+    end
+    h.eq(origin, { ['x/a.nvim'] = list, ['x/b.nvim'] = 'mine', ['x/c.nvim'] = single })
+end)
+
 test('expand_shorthand moves the first entry to repo', function()
     local spec = { 'owner/repo', opts = {} }
     manifest.expand_shorthand(spec)

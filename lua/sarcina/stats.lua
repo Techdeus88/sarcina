@@ -76,21 +76,31 @@ function M.get()
     return stats
 end
 
--- The position in `plan` the plugin is at. A task that was never created counts as done when a later
--- one was, as an install already on disk does. Running beats failed beats the last finished task.
-local function position(plan, latest)
+-- Each task of `plan` with its latest job and status. A task that was never created counts as done when a
+-- later one was, as an install already on disk does, and is pending otherwise.
+local function steps_of(plan, latest)
     local created = 0
     for i, id in ipairs(plan) do
         if latest[id] then created = i end
     end
-    local running, failed, finished = nil, nil, 0
+    local steps = {}
     for i, id in ipairs(plan) do
-        local status = latest[id] and latest[id].status or (i < created and 'done' or 'pending')
-        if status == 'running' then
+        local job = latest[id]
+        steps[i] =
+            { id = id, job = job, status = job and job.status or (i < created and 'done' or 'pending') }
+    end
+    return steps
+end
+
+-- The position the plugin is at: running beats failed beats the last finished task.
+local function position(steps)
+    local running, failed, finished = nil, nil, 0
+    for i, step in ipairs(steps) do
+        if step.status == 'running' then
             running = running or i
-        elseif status == 'failed' then
+        elseif step.status == 'failed' then
             failed = failed or i
-        elseif status == 'done' then
+        elseif step.status == 'done' then
             finished = i
         end
     end
@@ -149,7 +159,7 @@ local function row_of(name)
         duration = duration + (job.duration or 0)
     end
     row.state, row.detail = state_of(latest, jobs)
-    row.task = row.state == 'loaded' and row.tasks or position(entry.plan, latest)
+    row.task = row.state == 'loaded' and row.tasks or position(steps_of(entry.plan, latest))
     row.duration = duration > 0 and duration or nil
     return row
 end
@@ -160,6 +170,38 @@ end
 --- did not change never show as work.
 function M.plugin(name)
     if registered[name] then return row_of(name) end
+end
+
+--- The tasks of a plugin's plan in order, or nil for a plugin that is not registered: `id`, `status`,
+--- `duration` in ms, `note`, `output` and `error` (its first line). A task that never ran because it had
+--- nothing to do is `done` with the note `not needed`, and one that has not been created yet is `pending`.
+function M.steps(name)
+    local entry = registered[name]
+    if not entry then return end
+    local latest = {}
+    for _, job in ipairs(track.jobs_of(name)) do
+        latest[job.id] = job
+    end
+    return vim.tbl_map(function(step)
+        local job = step.job
+        if not job then
+            return { id = step.id, status = step.status, note = step.status == 'done' and 'not needed' or nil }
+        end
+        return {
+            id = step.id,
+            status = job.status,
+            duration = job.duration,
+            note = job.note,
+            output = job.output,
+            error = job.error and first_line(job.error) or nil,
+        }
+    end, steps_of(entry.plan, latest))
+end
+
+--- One resolved plugin as `{ name, timing, spec }`, as the live table, or nil. See `specs`.
+function M.spec(name)
+    local entry = registered[name]
+    if entry then return { name = name, timing = entry.timing, spec = entry.spec } end
 end
 
 --- The resolved plugins as `{ name, timing, spec }`, in the resolver's order (dependencies first), as the
