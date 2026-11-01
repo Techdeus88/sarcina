@@ -9,7 +9,7 @@ local track = require('sarcina.track')
 local M = {}
 
 local origin = vim.uv.hrtime() -- when setup() began
-local registered = {} -- plugin name -> { timing = 'now' | 'later' | 'trigger', plan = task ids }
+local registered = {} -- plugin name -> { timing = 'now' | 'later' | 'trigger', plan = task ids, spec }
 local order = {} -- plugin names in load order
 
 local CLASS = { now = 'now', later = 'later', trigger = 'triggered' }
@@ -29,12 +29,12 @@ local function plan_of(spec)
     return plan
 end
 
---- Remember each plugin's timing and task plan, from a resolved manifest, in the resolver's order.
+--- Remember each plugin's timing, resolved spec and task plan, from a resolved manifest, in the resolver's order.
 function M.register(resolved)
     registered, order = {}, {}
     for _, entry in ipairs(resolved) do
         table.insert(order, entry.name)
-        registered[entry.name] = { timing = entry.timing, plan = plan_of(entry.spec) }
+        registered[entry.name] = { timing = entry.timing, plan = plan_of(entry.spec), spec = entry.spec }
     end
 end
 
@@ -160,6 +160,15 @@ end
 --- did not change never show as work.
 function M.plugin(name)
     if registered[name] then return row_of(name) end
+end
+
+--- The resolved plugins as `{ name, timing, spec }`, in the resolver's order (dependencies first), as the
+--- live tables the engine runs from. `require('sarcina').get` hands out copies of them.
+function M.specs()
+    return vim.tbl_map(
+        function(name) return { name = name, timing = registered[name].timing, spec = registered[name].spec } end,
+        order
+    )
 end
 
 -- Plugin names in the order they loaded, from the tracker's record of how jobs ended: a plugin takes its

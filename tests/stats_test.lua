@@ -119,6 +119,44 @@ test('the public function is the stats getter and the table has exactly the docu
     h.eq(keys, { 'count', 'later', 'loaded', 'not_loaded', 'now', 'startup_ms', 'triggered' })
 end)
 
+test('get lists every plugin with its complete spec, in the resolver order, dependencies first', function()
+    local config = function() end
+    stats.register(resolver.resolve({
+        { name = 'app', repo = 'x/app', load = 'now', deps = { 'x/lib' }, config = config },
+        { name = 'page', repo = 'x/page', cmd = 'GetPage' },
+    }))
+    local all = require('sarcina').get()
+    h.eq(h.names(all), { 'lib', 'app', 'page' })
+    h.eq(vim.tbl_map(function(entry) return entry.timing end, all), { 'now', 'now', 'trigger' })
+    local app = all[2].spec
+    h.eq({ app.repo, app.deps }, { 'x/app', { 'lib' } })
+    h.eq(h.ids(app.tasks), { 'install', 'rtp', 'load' })
+    h.eq(app.tasks[3].fn, config)
+    h.eq(all[3].spec.triggers, { cmd = { 'GetPage' } })
+    h.eq(all[1].spec.repo, 'x/lib')
+end)
+
+test('get(name) returns one plugin, or nil for a name it does not know', function()
+    stats.register(resolver.resolve({ { name = 'one', repo = 'x/one' }, { name = 'two', repo = 'x/two' } }))
+    local one = require('sarcina').get('one')
+    h.eq({ one.name, one.timing, one.spec.repo }, { 'one', 'later', 'x/one' })
+    h.eq(require('sarcina').get('three'), nil)
+end)
+
+test('get hands out copies, so changing one never changes what the engine runs', function()
+    stats.register(resolver.resolve({ { name = 'one', repo = 'x/one' } }))
+    local copy = require('sarcina').get('one')
+    copy.spec.repo = 'changed'
+    table.insert(copy.spec.tasks, { id = 'extra' })
+    local again = require('sarcina').get('one')
+    h.eq({ again.spec.repo, #again.spec.tasks }, { 'x/one', 2 })
+end)
+
+test('get is empty before setup has registered anything', function()
+    h.eq(require('sarcina').get(), {})
+    h.eq(require('sarcina').get('one'), nil)
+end)
+
 test('stats.tasks lists every task with times since setup began', function()
     stats.begin()
     h.run({ { name = 'p', tasks = { h.lua('a', h.noop), h.lua('b', h.noop) } } })

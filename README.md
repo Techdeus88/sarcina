@@ -6,7 +6,7 @@ A Neovim plugin manager built around a task engine. Each plugin expands into an 
 
 ```
 lua/sarcina/
-├── init.lua          setup(): load, resolve, start; exports now, later, now_if_args, safely, stats
+├── init.lua          setup(): load, resolve, start; exports now, later, now_if_args, safely, stats, get
 ├── cli.lua           :Sarcina dispatcher (install, panel, help, ...)
 ├── manifest.lua      loads plugin specs from lua/plugins/**/*.lua
 ├── resolver.lua      orders plugins so dependencies come first, sets spec.triggers and each plugin's timing
@@ -187,6 +187,17 @@ An install of a plugin that is on disk, and a build whose commit did not change,
 To look at every tracked time, run `:lua vim.print(require('sarcina.stats').tasks())`.
 
 `require('sarcina.stats').tasks()` lists every task of the session with `plugin`, `id`, `type`, `status`, `attempts`, `note`, `error` and its `meta`, and with times in milliseconds since `setup()` began: `created`, `started`, `ended`, `duration` (end minus start) and `waited` (start minus creation, the time spent behind the install barrier or a dependency). A task that never ran has only `created`.
+
+## Specs
+
+```lua
+require('sarcina').get()        -- every plugin: { { name = 'plenary.nvim', timing = 'later', spec = { ... } }, ... }
+require('sarcina').get('mini.nvim')
+```
+
+`get()` lists the plugins in the resolver's order, dependencies first, which is a stable order. For the order they actually loaded in, read `stats.plugins()`. `timing` is `now`, `later` or `trigger`, after dependency promotion. Each `spec` is the complete one the engine runs from: the name is derived from `repo` when missing, `deps` are plain names, `triggers` are normalized, and `tasks` are generated. A name sarcina does not know gives `nil`, and before `setup()` has run the list is empty.
+
+The results are copies, so changing one changes nothing the engine runs. A spec holds your functions, such as `config`, so it does not survive `vim.json.encode`.
 
 ## Commands
 

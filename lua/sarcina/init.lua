@@ -16,6 +16,19 @@ M.safely, M.now, M.later, M.now_if_args = load.safely, load.now, load.later, loa
 --- Numbers about the session: count, loaded, not_loaded, now, later, triggered and startup_ms.
 M.stats = stats.get
 
+--- The resolved specs, complete: names derived, `deps` as names, triggers set and tasks generated. `get()`
+--- lists every plugin as `{ name, timing, spec }` in the resolver's order, dependencies first, and
+--- `get(name)` returns one, or nil. They are copies, so changing one changes nothing the engine runs.
+--- Empty before setup() has run.
+function M.get(name)
+    local found = {}
+    for _, entry in ipairs(stats.specs()) do
+        if name == nil or entry.name == name then table.insert(found, vim.deepcopy(entry)) end
+    end
+    if name == nil then return found end
+    return found[1]
+end
+
 --- User‑facing entry point.
 --- Call `require('sarcina').setup()` after adding Sarcina to your runtimepath.
 --- Installed `now` plugins load before it returns; the rest runs in the background once the UI is up,
