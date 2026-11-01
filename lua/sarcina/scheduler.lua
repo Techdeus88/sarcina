@@ -213,14 +213,14 @@ function M.load(name, prepare)
     if #claimed == 0 then return end
     local replay = prepare and prepare()
     for _, plugin in ipairs(claimed) do
-        tasks.enqueue(plugin.name, { deps = plugin.deps, tasks = plugin.deferred })
+        tasks.enqueue(plugin.name, { deps = plugin.deps, tasks = plugin.deferred }, { append = true })
     end
     tasks.run_all(function()
         for _, plugin in ipairs(claimed) do
             plugin.state = tasks.plugin_failed(plugin.name) and 'failed' or 'loaded'
         end
         if replay and M._plugins[name].state == 'loaded' then replay() end
-    end, { quiet = true })
+    end, { quiet = true, append = true })
 end
 
 --- Remove every stub and forget every registered plugin.

@@ -1,7 +1,8 @@
 -- sarcina/ui.lua
 -- Event bus and floating task panel for Sarcina.
 -- The panel is a pure view: it renders `tasks.snapshot()` and keeps no task state of its own.
--- Events: "info" | "warn" | "warning" | "error" (strings), "task" (job), "start", "done" (summary).
+-- Events: "info" | "warn" | "warning" | "error" (strings, shown as toasts), "debug" (string, listeners only),
+-- "task" (job), "start", "done" (summary).
 
 local M = {}
 
@@ -12,9 +13,11 @@ M._listeners = {}
 M._bufnr = nil
 M._winid = nil
 M._dismissed = false
+M._seen_failed = 0
 M._closing = false
 M._render_pending = false
-M._run_started = nil
+M._delay_passed = true
+M._run_id = 0
 
 local NS = vim.api.nvim_create_namespace('sarcina_ui')
 
@@ -62,10 +65,21 @@ function M._schedule_render()
     end)
 end
 
-function M._on_start()
-    M._dismissed = false
-    M._run_started = vim.uv.hrtime()
-    vim.defer_fn(M._schedule_render, M.show_delay)
+-- A fresh run starts over: the panel may open again and earlier failures count as unseen.
+function M._on_start(info)
+    if info == nil or info.fresh then
+        M._dismissed = false
+        M._seen_failed = 0
+    end
+    M._run_id = M._run_id + 1
+    local run = M._run_id
+    M._delay_passed = M.show_delay <= 0
+    vim.defer_fn(function()
+        if run == M._run_id then
+            M._delay_passed = true
+            M._schedule_render()
+        end
+    end, M.show_delay)
 end
 
 function M._on_done(summary)
@@ -74,14 +88,15 @@ function M._on_done(summary)
     if summary.failed > 0 then text = text .. string.format(', %d failed', summary.failed) end
     if summary.skipped > 0 then text = text .. string.format(', %d skipped', summary.skipped) end
     if summary.failed > 0 or not summary.quiet then M.emit(summary.failed > 0 and 'error' or 'info', text) end
-    if summary.failed == 0 then
+    -- Failures from earlier in the session keep the panel open, whichever run this was.
+    if snapshot().counts.failed == 0 then
         vim.defer_fn(function()
             if not require('sarcina.tasks').has_active() then M.close() end
         end, M.close_delay)
     end
 end
 
--- Emit an event. `payload` is a string for info/warn/error, a job for "task", a summary for "done".
+-- Emit an event. `payload` is a string for info/warn/error/debug, a job for "task", a summary for "done".
 function M.emit(event, payload)
     local level = LEVELS[event]
     if level then
@@ -89,7 +104,7 @@ function M.emit(event, payload)
     elseif event == 'task' then
         M._schedule_render()
     elseif event == 'start' then
-        M._on_start()
+        M._on_start(payload)
     elseif event == 'done' then
         M._on_done(payload)
     end
@@ -122,11 +137,21 @@ local function describe(job)
     return table.concat(bits, ' · ')
 end
 
-local function build_rows(jobs)
+local function panel_width() return math.min(math.max(40, math.floor(vim.o.columns * 0.4)), vim.o.columns - 4) end
+
+local function fit(text, max)
+    if max < 4 then return '' end
+    if vim.fn.strdisplaywidth(text) <= max then return text end
+    return vim.fn.strcharpart(text, 0, max - 1) .. '…'
+end
+
+-- A running row's output changes constantly, so it is cut to one line to keep the window height steady.
+local function build_rows(jobs, width)
     local rows = {}
     for i, job in ipairs(jobs) do
         local head = string.format('%s %s – %s', GLYPH[job.status], job.plugin, job.id)
         local note = describe(job)
+        if job.status == 'running' then note = fit(note, width - vim.fn.strdisplaywidth(head) - 2) end
         rows[i] = {
             line = note ~= '' and (head .. '  ' .. note) or head,
             glyph_len = #GLYPH[job.status],
@@ -144,8 +169,7 @@ local function title(snap)
     return text .. ' '
 end
 
-local function layout(lines)
-    local width = math.min(math.max(40, math.floor(vim.o.columns * 0.4)), vim.o.columns - 4)
+local function layout(lines, width)
     local height = 0
     for _, line in ipairs(lines) do
         height = height + math.max(1, math.ceil(vim.fn.strdisplaywidth(line) / width))
@@ -176,7 +200,10 @@ local function open_window(config)
         pattern = tostring(M._winid),
         once = true,
         callback = function()
-            if not M._closing then M._dismissed = true end
+            if not M._closing then
+                M._dismissed = true
+                M._seen_failed = snapshot().counts.failed
+            end
             M._winid = nil
         end,
     })
@@ -215,28 +242,33 @@ local function follow(jobs)
     for i, job in ipairs(jobs) do
         if job.status == 'running' then
             running = i
-        elseif job.status == 'failed' and not failed then
+        elseif job.status == 'failed' then
             failed = i
         end
     end
     vim.api.nvim_win_set_cursor(M._winid, { running or failed or #jobs, 0 })
 end
 
+-- A failure the user has not seen yet opens the panel at once; plain progress waits for show_delay.
 local function should_open(snap)
-    if snap.counts.failed > 0 then return true end
+    if snap.counts.failed > M._seen_failed then return true end
     if not require('sarcina.tasks').has_active() then return false end
-    local elapsed = M._run_started and (vim.uv.hrtime() - M._run_started) / 1e6 or math.huge
-    return elapsed >= M.show_delay
+    return M._delay_passed
 end
 
 -- Render the current task state. `force` opens the panel regardless of run age.
 function M._render(force)
     local snap = snapshot()
-    if snap.total == 0 or M._dismissed then return end
+    if snap.total == 0 then return end
+    if M._dismissed then
+        if snap.counts.failed <= M._seen_failed then return end
+        M._dismissed = false
+    end
     if not win_valid() and not force and not should_open(snap) then return end
     ensure_buffer()
-    local lines = draw(build_rows(snap.jobs))
-    local config = layout(lines)
+    local width = panel_width()
+    local lines = draw(build_rows(snap.jobs, width))
+    local config = layout(lines, width)
     config.title = title(snap)
     config.title_pos = 'center'
     if win_valid() then
@@ -244,6 +276,7 @@ function M._render(force)
     else
         open_window(config)
     end
+    M._seen_failed = snap.counts.failed
     follow(snap.jobs)
 end
 
@@ -263,6 +296,7 @@ end
 
 function M.dismiss()
     M._dismissed = true
+    M._seen_failed = snapshot().counts.failed
     M.close()
 end
 

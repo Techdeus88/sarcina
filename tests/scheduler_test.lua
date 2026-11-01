@@ -20,14 +20,9 @@ local function module_body(tag, extra)
     }, '\n')
 end
 
--- Installs a fixture plugin in the opt pack dir, where a lazy plugin lives.
-local function lazy_plugin(name, module, extra)
-    h.plugin_dir({ [module] = module_body(name, extra) }, paths.install(name, true))
-end
-
--- Eager plugins, including lazy ones forced eager by a dependent, live in the start pack dir.
-local function eager_plugin(name, module, extra)
-    h.plugin_dir({ [module] = module_body(name, extra) }, paths.install(name, false))
+-- Installs a fixture plugin where the rtp task expects to find it.
+local function fixture_plugin(name, module, extra)
+    h.plugin_dir({ [module] = module_body(name, extra) }, paths.install(name))
 end
 
 local function start(specs)
@@ -49,7 +44,7 @@ end)
 
 test('startup registers stubs and loads nothing', function()
     local extra = "vim.api.nvim_create_user_command('CmdPlug', function() end, {})"
-    lazy_plugin('cmdplug.nvim', 'cmdplug', extra)
+    fixture_plugin('cmdplug.nvim', 'cmdplug', extra)
     start({ { name = 'cmdplug.nvim', cmd = 'CmdPlug', opts = {} } })
     h.eq(scheduler.state('cmdplug.nvim'), 'waiting')
     h.eq(_G.lazy_log, nil)
@@ -61,7 +56,7 @@ end)
 test('a command trigger loads the plugin, then runs the command', function()
     local extra =
         "vim.api.nvim_create_user_command('CmdRun', function(o) table.insert(_G.lazy_log, 'cmd:' .. o.args) end, { nargs = '*' })"
-    lazy_plugin('cmdrun.nvim', 'cmdrun', extra)
+    fixture_plugin('cmdrun.nvim', 'cmdrun', extra)
     start({ { name = 'cmdrun.nvim', cmd = 'CmdRun', opts = {} } })
     vim.cmd('CmdRun hello')
     h.ok(vim.wait(2000, function() return #log() >= 2 end), 'plugin never loaded')
@@ -71,7 +66,7 @@ end)
 
 test('a load triggered later runs quietly', function()
     local extra = "vim.api.nvim_create_user_command('CmdQuiet', function() end, {})"
-    lazy_plugin('cmdquiet.nvim', 'cmdquiet', extra)
+    fixture_plugin('cmdquiet.nvim', 'cmdquiet', extra)
     start({ { name = 'cmdquiet.nvim', cmd = 'CmdQuiet', opts = {} } })
     h.notes = {}
     vim.cmd('CmdQuiet')
@@ -80,7 +75,7 @@ test('a load triggered later runs quietly', function()
 end)
 
 test('the config task runs on load, with opts', function()
-    lazy_plugin('cfgplug.nvim', 'cfgplug', '')
+    fixture_plugin('cfgplug.nvim', 'cfgplug', '')
     local seen
     start({
         {
@@ -102,7 +97,7 @@ end)
 test("an event trigger replays only the plugin's own handlers", function()
     local extra =
         "vim.api.nvim_create_autocmd('User', { pattern = 'EvtPlug', callback = function() table.insert(_G.lazy_log, 'plugin-handler') end })"
-    lazy_plugin('evtplug.nvim', 'evtplug', extra)
+    fixture_plugin('evtplug.nvim', 'evtplug', extra)
     vim.api.nvim_create_autocmd('User', {
         pattern = 'EvtPlug',
         callback = function()
@@ -125,7 +120,7 @@ end)
 test('replay runs a buffer-local autocmd for the triggering buffer', function()
     local extra =
         "vim.api.nvim_create_autocmd('BufEnter', { buffer = 0, callback = function() table.insert(_G.lazy_log, 'buf-handler') end })"
-    lazy_plugin('bufplug.nvim', 'bufplug', extra)
+    fixture_plugin('bufplug.nvim', 'bufplug', extra)
     start({ { name = 'bufplug.nvim', event = 'BufEnter', opts = {} } })
     vim.cmd('enew!')
     h.ok(loaded('bufplug.nvim'))
@@ -135,7 +130,7 @@ end)
 test('a filetype trigger loads on the first matching buffer', function()
     local extra =
         "vim.api.nvim_create_autocmd('FileType', { pattern = 'ftplugtest', callback = function() table.insert(_G.lazy_log, 'ft-handler') end })"
-    lazy_plugin('ftplug.nvim', 'ftplug', extra)
+    fixture_plugin('ftplug.nvim', 'ftplug', extra)
     start({ { name = 'ftplug.nvim', ft = 'ftplugtest', opts = {} } })
     h.eq(scheduler.state('ftplug.nvim'), 'waiting')
     vim.cmd('enew!')
@@ -145,8 +140,23 @@ test('a filetype trigger loads on the first matching buffer', function()
     vim.api.nvim_clear_autocmds({ event = 'FileType', pattern = 'ftplugtest' })
 end)
 
+test('a lazy load adds its rows to the startup run and keeps earlier failures', function()
+    fixture_plugin('rows.nvim', 'rows', "vim.api.nvim_create_user_command('RowsCmd', function() end, {})")
+    start({
+        { name = 'broken', tasks = { h.lua('x', function() error('no') end) } },
+        { name = 'rows.nvim', cmd = 'RowsCmd', opts = {} },
+    })
+    h.notes = {}
+    vim.cmd('RowsCmd')
+    h.ok(loaded('rows.nvim'))
+    local ids = vim.tbl_map(function(job) return job.plugin .. '/' .. job.id end, tasks.snapshot().jobs)
+    h.eq(ids, { 'broken/x', 'rows.nvim/load_trigger', 'rows.nvim/rtp', 'rows.nvim/load' })
+    h.eq(tasks.snapshot().counts.failed, 1)
+    h.eq(h.notes, {})
+end)
+
 test("a key trigger swaps its stub for the plugin's mapping", function()
-    lazy_plugin('keyplug.nvim', 'keyplug', "vim.keymap.set('n', '<F9>', function() end)")
+    fixture_plugin('keyplug.nvim', 'keyplug', "vim.keymap.set('n', '<F9>', function() end)")
     start({ { name = 'keyplug.nvim', keys = { '<F9>' }, opts = {} } })
     local stub = vim.fn.maparg('<F9>', 'n', false, true)
     h.eq(type(stub.callback), 'function')
@@ -159,8 +169,8 @@ end)
 
 test('loading a plugin loads its lazy dependencies first', function()
     local extra_a = "vim.api.nvim_create_user_command('DepA', function() end, {})"
-    lazy_plugin('depb.nvim', 'depb', '')
-    lazy_plugin('depa.nvim', 'depa', extra_a)
+    fixture_plugin('depb.nvim', 'depb', '')
+    fixture_plugin('depa.nvim', 'depa', extra_a)
     start({
         { name = 'depa.nvim', deps = { 'depb.nvim' }, cmd = 'DepA', opts = {} },
         { name = 'depb.nvim', event = 'User DepB', opts = {} },
@@ -173,8 +183,8 @@ test('loading a plugin loads its lazy dependencies first', function()
 end)
 
 test('an eager plugin pulls its lazy dependency in at startup', function()
-    eager_plugin('eagerdep.nvim', 'eagerdep', '')
-    eager_plugin('eagerapp.nvim', 'eagerapp', '')
+    fixture_plugin('eagerdep.nvim', 'eagerdep', '')
+    fixture_plugin('eagerapp.nvim', 'eagerapp', '')
     start({
         { name = 'eagerapp.nvim', deps = { 'eagerdep.nvim' }, opts = {} },
         { name = 'eagerdep.nvim', cmd = 'EagerDep', opts = {} },
@@ -195,7 +205,7 @@ end)
 
 test('loading an unknown or loaded plugin does nothing', function()
     scheduler.load('nobody')
-    lazy_plugin('twice.nvim', 'twice', "vim.api.nvim_create_user_command('Twice', function() end, {})")
+    fixture_plugin('twice.nvim', 'twice', "vim.api.nvim_create_user_command('Twice', function() end, {})")
     start({ { name = 'twice.nvim', cmd = 'Twice', opts = {} } })
     scheduler.load('twice.nvim')
     h.ok(loaded('twice.nvim'))

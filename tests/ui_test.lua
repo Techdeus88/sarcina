@@ -10,6 +10,30 @@ executors.t_slow = function(_, done)
     vim.defer_fn(function() done(true) end, 150)
 end
 
+executors.t_quiet = function(_, done)
+    vim.defer_fn(function() done(true) end, 600)
+end
+
+executors.t_chatty = function(_, done, report)
+    local output = { 'short', string.rep('x', 200), string.rep('y', 90), 'tiny', string.rep('z', 41) }
+    local i = 0
+    local function step()
+        i = i + 1
+        if i > #output then return done(true) end
+        report(output[i])
+        vim.defer_fn(step, 60)
+    end
+    step()
+end
+
+local function append_run(plugins)
+    for _, plugin in ipairs(plugins) do
+        tasks.enqueue(plugin.name, plugin, { append = true })
+    end
+    tasks.run_all(nil, { quiet = true, append = true })
+    h.ok(tasks.wait(2000))
+end
+
 local function win_open() return ui._winid ~= nil and vim.api.nvim_win_is_valid(ui._winid) end
 
 local function lines() return vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false) end
@@ -70,6 +94,95 @@ end)
 test('a failure opens the panel on its own', function()
     h.run({ failing('a') })
     h.ok(vim.wait(200, win_open))
+end)
+
+test('the panel opens when show_delay passes, even if no task reports anything', function()
+    tasks.enqueue('quiet', { tasks = { { id = 'a', type = 't_quiet' } } })
+    tasks.run_all()
+    h.ok(vim.wait(450, win_open), 'panel never opened while the task stayed silent')
+    h.ok(tasks.wait(2000))
+end)
+
+test('the panel keeps its height while a running job reports lines of any length', function()
+    ui.show_delay = 0
+    tasks.enqueue('chatty', { tasks = { { id = 'a', type = 't_chatty' } } })
+    tasks.run_all()
+    h.ok(vim.wait(500, win_open), 'panel never opened')
+    local heights, widest = {}, 0
+    vim.wait(450, function()
+        if win_open() then
+            heights[vim.api.nvim_win_get_config(ui._winid).height] = true
+            for _, line in ipairs(lines()) do
+                widest = math.max(widest, vim.fn.strdisplaywidth(line))
+            end
+        end
+        return false
+    end, 10)
+    h.eq(vim.tbl_count(heights), 1, 'heights seen: ' .. vim.inspect(vim.tbl_keys(heights)))
+    h.ok(
+        widest <= vim.api.nvim_win_get_config(ui._winid).width,
+        'a running row spilled past the window width'
+    )
+    h.ok(tasks.wait(2000))
+end)
+
+test('an appended run keeps earlier failures in the panel', function()
+    h.run({ failing('a') })
+    h.ok(vim.wait(200, win_open))
+    append_run({ { name = 'b', tasks = { h.lua('y', h.noop) } } })
+    vim.wait(100)
+    local text = table.concat(lines(), '\n')
+    h.ok(text:find('✘ a – x', 1, true), text)
+    h.ok(text:find('✔ b – y', 1, true), text)
+end)
+
+test('with nothing running the cursor sits on the newest failure', function()
+    h.run({ failing('a'), { name = 'b', tasks = { h.lua('y', h.noop) } }, failing('c') })
+    ui.open()
+    h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 3)
+end)
+
+test('a clean appended run does not auto-close a panel that still shows a failure', function()
+    ui.close_delay = 50
+    h.run({ failing('a') })
+    h.ok(vim.wait(200, win_open))
+    append_run({ { name = 'b', tasks = { h.lua('y', h.noop) } } })
+    vim.wait(300)
+    h.ok(win_open(), 'the panel closed on top of an unseen failure')
+end)
+
+test('a dismissed panel ignores a clean appended run but reopens for a new failure', function()
+    h.run({ failing('a') })
+    h.ok(vim.wait(200, win_open))
+    ui.dismiss()
+    append_run({ { name = 'b', tasks = { h.lua('y', h.noop) } } })
+    vim.wait(300)
+    h.eq(win_open(), false)
+    append_run({ failing('c') })
+    h.ok(vim.wait(300, win_open), 'a new failure did not reopen the panel')
+    h.ok(title():find('2 failed', 1, true), title())
+end)
+
+test('a normal run toasts one summary line', function()
+    h.run({ { name = 'p', tasks = { h.lua('a', h.noop) } } })
+    h.eq(#h.notes, 1)
+    h.eq(h.notes[1].msg, '[Sarcina] 1 done')
+end)
+
+test('a quiet run toasts nothing when clean and one line when it fails', function()
+    h.run({ { name = 'p', tasks = { h.lua('a', h.noop) } } }, { quiet = true })
+    h.eq(h.notes, {})
+    h.run({ failing('q') }, { quiet = true })
+    h.eq(#h.notes, 1)
+    h.ok(h.notified('1 failed'))
+end)
+
+test('debug events reach listeners but never become toasts', function()
+    local seen = {}
+    ui.on('debug', function(text) table.insert(seen, text) end)
+    ui.emit('debug', 'details')
+    h.eq(seen, { 'details' })
+    h.eq(h.notes, {})
 end)
 
 test('a quick clean run never opens the panel', function()

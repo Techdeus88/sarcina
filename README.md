@@ -53,8 +53,9 @@ return {
 | `opts` | handed to `require(module).setup(opts)` when there is no `config` |
 | `main` | the module to require; found from the plugin name when missing |
 | `event`, `ft`, `cmd`, `keys` | lazy-load triggers |
-| `opt` | install under `pack/sarcina/opt` instead of `start` |
 | `tasks` | an explicit task list, which skips the generated one |
+
+Every plugin, lazy or not, is cloned to `stdpath('data')/sarcina/plugins/<name>`. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs, which is after `VimEnter` unless your config calls `require('sarcina.tasks').wait()`.
 
 Without `main`, sarcina matches the plugin name, then the repo name, against the modules in the plugin's `lua/` directory, ignoring case, punctuation and `nvim` affixes. A lone module wins by default. If it cannot tell, the load task fails with the list of modules and asks you to set `main`.
 
@@ -62,13 +63,13 @@ Without `main`, sarcina matches the plugin name, then the repo name, against the
 
 A spec with `event`, `ft`, `cmd` or `keys` is lazy. The resolver normalizes those fields into `spec.triggers`, and `triggers = false` forces a plugin to load eagerly.
 
-- At startup a lazy plugin only clones (into `opt/`), builds, and registers stubs for its triggers. The `load_trigger` row reads `waiting for :Telescope`.
+- At startup a lazy plugin only clones, builds, and registers stubs for its triggers. The `load_trigger` row reads `waiting for :Telescope`.
 - The first trigger to fire removes every stub, then runs the plugin's `rtp`, `load` and `after` tasks through the task runner, so a failed config shows up in the panel like any other failure.
 - Lazy dependencies load first. An eager plugin pulls its dependencies in at startup, transitively.
 - Afterwards the trigger replays. A command runs again with its args, bang and range. A key is fed again. An event runs only the autocmds the plugin added, so other plugins' handlers do not fire twice.
 - `event` takes `'BufRead'` or `'User Foo'`, with an optional pattern after the event name.
 
-Only the plugin's `plugin/` files are sourced on a late load. `ftplugin`, `ftdetect` and `syntax` files take effect from the next buffer.
+Only the plugin's `plugin/` and `after/plugin/` files are sourced on a late load. `ftplugin`, `ftdetect` and `syntax` files take effect from the next buffer.
 
 ## Commands
 
@@ -87,13 +88,22 @@ Only the plugin's `plugin/` files are sourced on a late load. `ftplugin`, `ftdet
 - A task with `when = '<lua expression>'` is dropped from the queue when the expression is false.
 - Executors are `function(job, done, report)`. They call `done(ok, msg)` once and `report(line)` for live output. The runner owns every status change, so an executor cannot leave a task stuck in `running`.
 
+`tasks.enqueue(name, spec, { append = true })` and `tasks.run_all(cb, { append = true })` add to the job list instead of starting a new one, and the summary then counts only the jobs added since the last one. The scheduler uses this for lazy loads.
+
 Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.snapshot()` returns the jobs in queue order plus a count per status. Each change fires `ui.emit('task', job)`, and `ui.on('task', fn)` listens for them.
 
 ## Task panel
 
-The panel renders `tasks.snapshot()` and keeps no state of its own, so it cannot drift from the engine. It opens when a run lasts longer than `ui.show_delay` (250 ms) or when anything fails, and closes `ui.close_delay` (3 s) after a clean run. Failures keep it open. `q` or closing the window dismisses it until the next run, and `:Sarcina panel` brings it back.
+The panel renders `tasks.snapshot()` and keeps no state of its own, so it cannot drift from the engine. It opens when a run lasts longer than `ui.show_delay` (250 ms) or when a failure appears, and closes `ui.close_delay` (3 s) after a run once nothing has failed. A failure keeps it open. `q` or closing the window dismisses it, and `:Sarcina panel` brings it back.
 
-A lazy load is a run of its own. It stays quiet when it succeeds and opens the panel when it fails.
+- A running row shows git's latest line cut to the window width, so the panel keeps one height while output streams. A finished row wraps its error in full.
+- A lazy load appends its rows to the current list instead of replacing it. Failures from earlier in the session stay on screen, and the plugin's `rtp` and `load` rows are added at the end of the list. With nothing running, the cursor sits on the newest failure.
+- A dismissed panel stays closed through later runs and reopens only for a failure it has not shown yet.
+- Starting a fresh run, such as `:Sarcina install` after a finished one, replaces the list.
+
+## Messages
+
+Only problems become toasts. `setup()` runs quietly, so a clean launch prints nothing and the panel carries the progress. A run with failures ends with one error line such as `2 done, 1 failed, 4 skipped`, counting only that run. `:Sarcina install` also prints a summary when it succeeds. The resolver's chatter, such as derived plugin names, goes out as `debug` events that only `ui.on('debug', fn)` listeners receive.
 
 ## Development
 

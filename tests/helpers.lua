@@ -28,7 +28,8 @@ function M.reset()
     ui.close()
     ui._listeners = {}
     ui._dismissed = false
-    ui._run_started = nil
+    ui._delay_passed = true
+    ui._seen_failed = 0
     ui.show_delay = 250
     ui.close_delay = 60000
 end
@@ -75,13 +76,13 @@ function M.plugin_dir(modules, root)
 end
 
 --- Enqueue `plugins` ({ name, deps, tasks }), run to completion, and return the summary.
-function M.run(plugins)
+function M.run(plugins, opts)
     local tasks = require('sarcina.tasks')
     for _, plugin in ipairs(plugins) do
         tasks.enqueue(plugin.name, plugin)
     end
     local summary
-    tasks.run_all(function(s) summary = s end)
+    tasks.run_all(function(s) summary = s end, opts)
     assert(tasks.wait(5000), 'tasks did not finish')
     return summary
 end

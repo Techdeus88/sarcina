@@ -79,6 +79,11 @@ test('a lazy plugin keeps its lazy dependencies lazy', function()
     end
 end)
 
+test('resolving is silent when nothing is wrong', function()
+    resolver.resolve({ { repo = 'nvim-lua/plenary.nvim' }, { name = 'b', repo = 'x/b' } })
+    h.eq(h.notes, {})
+end)
+
 test('attaches generated tasks to each spec', function()
     local resolved = resolver.resolve({ { name = 'a', repo = 'x/a' } })
     h.eq(h.ids(resolved[1].spec.tasks), { 'install', 'rtp' })

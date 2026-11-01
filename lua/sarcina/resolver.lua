@@ -51,7 +51,7 @@ function M.resolve(manifest)
                 if inferred then
                     plug.name = inferred
                     ui.emit(
-                        'info',
+                        'debug',
                         string.format('Derived plugin name "%s" from repo "%s"', plug.name, plug.repo)
                     )
                 else
@@ -104,7 +104,7 @@ function M.resolve(manifest)
     for _, name in ipairs(sorted_names) do
         table.insert(ordered, { name = name, spec = name_to_spec[name] })
     end
-    ui.emit('info', string.format('Resolved %d plugins (order respects dependencies)', #ordered))
+    ui.emit('debug', string.format('Resolved %d plugins (order respects dependencies)', #ordered))
 
     -- -----------------------------------------------------------------
     -- Generate default tasks for each plugin if not explicitly defined

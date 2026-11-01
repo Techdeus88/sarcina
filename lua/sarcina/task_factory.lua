@@ -27,8 +27,8 @@ function M.triggers(spec)
 end
 
 -- A string runs as a Lua chunk; a function is kept as a closure.
-local function lua_task(id, value, opts, opt)
-    local task = { id = id, type = 'lua', opts = opts, opt = opt }
+local function lua_task(id, value, opts)
+    local task = { id = id, type = 'lua', opts = opts }
     if type(value) == 'function' then
         task.fn = value
     elseif type(value) == 'string' then
@@ -51,8 +51,8 @@ local function candidate_names(spec)
 end
 
 -- `config` wins. Otherwise `opts` or `main` requires the plugin's main module and calls setup(opts).
-local function load_task(spec, opt)
-    if spec.config then return lua_task('load', spec.config, spec.opts, opt) end
+local function load_task(spec)
+    if spec.config then return lua_task('load', spec.config, spec.opts) end
     if spec.main == nil and spec.opts == nil then return nil end
     local main, names = spec.main, candidate_names(spec)
     return lua_task('load', function(plugin, opts)
@@ -69,7 +69,7 @@ local function load_task(spec, opt)
             end
             loaded.setup(opts)
         end
-    end, spec.opts, opt)
+    end, spec.opts)
 end
 
 -- Task order: before, install, build, then rtp, load, after. A lazy plugin swaps the last three
@@ -78,22 +78,19 @@ function M.generate(spec)
     local triggers = spec.triggers
     if triggers == nil then triggers = M.triggers(spec) end
     local lazy = type(triggers) == 'table'
-    local opt = spec.opt or lazy
     local tasks = {}
 
     local before = spec.init or spec.before
-    if before then table.insert(tasks, lua_task('before', before, nil, opt)) end
+    if before then table.insert(tasks, lua_task('before', before)) end
 
-    if spec.repo then
-        table.insert(tasks, { id = 'install', type = 'git_clone', repo = spec.repo, opt = opt })
-    end
+    if spec.repo then table.insert(tasks, { id = 'install', type = 'git_clone', repo = spec.repo }) end
 
-    if spec.build then table.insert(tasks, lua_task('build', spec.build, nil, opt)) end
+    if spec.build then table.insert(tasks, lua_task('build', spec.build)) end
 
-    local loading = { { id = 'rtp', type = 'rtp', opt = opt } }
-    local load = load_task(spec, opt)
+    local loading = { { id = 'rtp', type = 'rtp' } }
+    local load = load_task(spec)
     if load then table.insert(loading, load) end
-    if spec.after then table.insert(loading, lua_task('after', spec.after, nil, opt)) end
+    if spec.after then table.insert(loading, lua_task('after', spec.after)) end
 
     if lazy then
         table.insert(tasks, {

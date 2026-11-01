@@ -17,6 +17,8 @@ M._order = {}
 M._running = 0
 M._started = false
 M._quiet = false
+M._fresh = false
+M._counted = 0
 M._callbacks = {}
 
 local run_job, pump
@@ -25,6 +27,8 @@ local function emit(job) ui.emit('task', job) end
 
 local function reset()
     M._jobs, M._plugins, M._order, M._running = {}, {}, {}, 0
+    M._counted = 0
+    M._fresh = true
 end
 
 function M.has_active()
@@ -56,9 +60,10 @@ local function condition_ok(task)
     return ok and res and true or false
 end
 
--- Enqueue all tasks for a given plugin spec (if conditions pass).
-function M.enqueue(plugin_name, plugin_spec)
-    if not M.has_active() then reset() end
+--- Enqueue all tasks for a given plugin spec (if conditions pass).
+--- A new run replaces the job list. `opts.append` adds to it instead, so earlier results stay visible.
+function M.enqueue(plugin_name, plugin_spec, opts)
+    if not (opts and opts.append) and not M.has_active() then reset() end
     local plugin = M._plugins[plugin_name]
     if not plugin then
         local deps = plugin_spec.deps or plugin_spec.dependencies
@@ -105,6 +110,18 @@ local function dependency_state(plugin)
     return 'ready'
 end
 
+-- Counts the jobs added since the last summary, so an appended run reports only itself.
+local function summarize()
+    local summary = { total = 0, done = 0, failed = 0, skipped = 0 }
+    for i = M._counted + 1, #M._jobs do
+        local status = M._jobs[i].status
+        summary.total = summary.total + 1
+        summary[status] = summary[status] + 1
+    end
+    M._counted = #M._jobs
+    return summary
+end
+
 local function settle()
     if M._running > 0 then return end
     for _, name in ipairs(M._order) do
@@ -115,8 +132,7 @@ local function settle()
         end
     end
     M._started = false
-    local counts = M.snapshot().counts
-    local summary = { total = #M._jobs, done = counts.done, failed = counts.failed, skipped = counts.skipped }
+    local summary = summarize()
     if M._quiet then summary.quiet = true end
     ui.emit('done', summary)
     local callbacks = M._callbacks
@@ -205,18 +221,21 @@ function pump()
 end
 
 --- Start running everything enqueued. Returns immediately; `on_done(summary)` fires when the queue drains.
---- `opts.quiet` hides the end-of-run toast when nothing failed.
+--- `opts.quiet` hides the end-of-run toast when nothing failed. `opts.append` keeps the earlier job list.
 function M.run_all(on_done, opts)
     local quiet = opts ~= nil and opts.quiet == true
+    local append = opts ~= nil and opts.append == true
     if on_done then table.insert(M._callbacks, on_done) end
     if M._started then
         M._quiet = M._quiet and quiet
         return
     end
-    if not M.has_active() then reset() end
+    if not append and not M.has_active() then reset() end
+    local fresh = M._fresh
+    M._fresh = false
     M._started = true
     M._quiet = quiet
-    ui.emit('start', { total = #M._jobs })
+    ui.emit('start', { total = #M._jobs, fresh = fresh })
     vim.schedule(pump)
 end
 

@@ -189,6 +189,35 @@ test('calls back with a summary, even for an empty queue', function()
     h.eq(got, { total = 0, done = 0, failed = 0, skipped = 0 })
 end)
 
+test('an appended run keeps earlier jobs and reports only its own', function()
+    h.run({
+        {
+            name = 'a',
+            tasks = {
+                h.lua('x', function() error('no') end),
+                h.lua('y', h.noop),
+            },
+        },
+    })
+    tasks.enqueue('b', { tasks = { h.lua('z', h.noop) } }, { append = true })
+    local summary
+    tasks.run_all(function(s) summary = s end, { append = true })
+    h.ok(tasks.wait(2000))
+    h.eq(summary, { total = 1, done = 1, failed = 0, skipped = 0 })
+    h.eq(h.ids(tasks.snapshot().jobs), { 'x', 'y', 'z' })
+    h.eq(tasks.snapshot().counts.failed, 1)
+end)
+
+test('the start event says whether a run is fresh', function()
+    local starts = {}
+    ui.on('start', function(info) table.insert(starts, info.fresh) end)
+    h.run({ { name = 'p', tasks = { h.lua('a', h.noop) } } })
+    tasks.enqueue('q', { tasks = { h.lua('b', h.noop) } }, { append = true })
+    tasks.run_all(nil, { append = true })
+    h.ok(tasks.wait(2000))
+    h.eq(starts, { true, false })
+end)
+
 test('a second run starts from a clean slate', function()
     h.run({ { name = 'p', tasks = { h.lua('old', h.noop) } } })
     h.run({ { name = 'p', tasks = { h.lua('new', h.noop) } } })

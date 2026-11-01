@@ -44,9 +44,9 @@ local function run_cmd(cmd, opts, report, cb)
     if not spawned then cb(false, err) end
 end
 
-local function source_plugin_files(path)
+local function source_plugin_files(dir)
     for _, ext in ipairs({ 'vim', 'lua' }) do
-        for _, file in ipairs(vim.fn.globpath(path, 'plugin/**/*.' .. ext, false, true)) do
+        for _, file in ipairs(vim.fn.globpath(dir, 'plugin/**/*.' .. ext, false, true)) do
             vim.cmd.source(vim.fn.fnameescape(file))
         end
     end
@@ -55,7 +55,7 @@ end
 function M.git_clone(job, done, report)
     local spec = job.spec
     if not spec.repo then return done(false, 'no repo') end
-    local dest = spec.dest or paths.install(job.plugin, spec.opt)
+    local dest = spec.dest or paths.install(job.plugin)
     if uv.fs_stat(dest) then return done(true, 'already installed') end
     local staging = paths.staging(job.plugin)
     vim.fn.mkdir(vim.fn.fnamemodify(staging, ':h'), 'p')
@@ -78,17 +78,27 @@ function M.git_clone(job, done, report)
 end
 
 function M.make(job, done, report)
-    local cwd = job.spec.cwd or paths.install(job.plugin, job.spec.opt)
+    local cwd = job.spec.cwd or paths.install(job.plugin)
     run_cmd({ 'make' }, { cwd = cwd }, report, done)
 end
 
 function M.rtp(job, done)
-    local path = paths.install(job.plugin, job.spec.opt)
+    local path = paths.install(job.plugin)
     if not uv.fs_stat(path) then return done(false, 'plugin directory missing: ' .. path) end
     local rtp = vim.opt.rtp:get() --[[@as string[] ]]
     if vim.tbl_contains(rtp, path) then return done(true) end
-    vim.opt.rtp:append(path)
-    if vim.v.vim_did_enter == 1 then source_plugin_files(path) end
+    -- Like a start/ package: the plugin joins the runtimepath, its after/ dir goes behind it.
+    local dirs = { path }
+    if uv.fs_stat(path .. '/after') then table.insert(dirs, path .. '/after') end
+    for _, dir in ipairs(dirs) do
+        vim.opt.rtp:append(dir)
+    end
+    -- Before VimEnter, Neovim's own startup pass sources plugin/ and after/plugin from the rtp.
+    if vim.v.vim_did_enter == 1 then
+        for _, dir in ipairs(dirs) do
+            source_plugin_files(dir)
+        end
+    end
     done(true)
 end
 
@@ -108,7 +118,7 @@ function M.lua(job, done)
         fn, err = loadstring(spec.script or '')
         if not fn then return done(false, err) end
     end
-    local plugin = { name = job.plugin, dir = paths.install(job.plugin, spec.opt) }
+    local plugin = { name = job.plugin, dir = paths.install(job.plugin) }
     local ok, err = pcall(fn, plugin, spec.opts)
     if ok then
         done(true)

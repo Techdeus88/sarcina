@@ -28,7 +28,6 @@ end
 -- A manifest is a *list* (array) of plugin specs.
 ---@type { key: string, type: string|string[] }[]
 local OPTIONAL_FIELDS = {
-    { key = 'opt', type = 'boolean' },
     { key = 'deps', type = 'table' },
     { key = 'dependencies', type = 'table' },
     { key = 'cmd', type = { 'table', 'string' } },
@@ -111,7 +110,7 @@ function M.validate_manifest(manifest)
         end
     end
 
-    ui.emit('info', '[Schema] Manifest validation succeeded.')
+    ui.emit('debug', '[Schema] Manifest validation succeeded.')
     return true
 end
 

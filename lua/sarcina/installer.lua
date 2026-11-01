@@ -13,13 +13,14 @@ function M.install_one(plugin_name, spec) tasks.enqueue(plugin_name, spec) end
 
 --- Queue and run every plugin described by a resolved manifest.
 --- `resolved` is expected to be a list of tables: { name = <string>, spec = <table> }.
---- Returns immediately; `on_done(summary)` fires once the queue drains.
-function M.install_all(resolved, on_done)
-    ui.emit('info', string.format('Starting bulk install of %d plugins', #resolved))
+--- Returns immediately; `on_done(summary)` fires once the queue drains. `opts.quiet` skips the
+--- end-of-run toast unless something failed.
+function M.install_all(resolved, on_done, opts)
+    ui.emit('debug', string.format('Starting bulk install of %d plugins', #resolved))
     for _, entry in ipairs(resolved) do
         M.install_one(entry.name, entry.spec)
     end
-    tasks.run_all(on_done)
+    tasks.run_all(on_done, opts)
 end
 
 return M

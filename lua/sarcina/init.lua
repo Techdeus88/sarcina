@@ -23,7 +23,7 @@ function M.setup(opts)
 
     -- 3️⃣ Queue every plugin's tasks and run them in the background. Lazy plugins register their
     -- triggers and load later; the rest clone, join the runtimepath and run their config.
-    installer.install_all(resolved)
+    installer.install_all(resolved, nil, { quiet = true })
 end
 
 return M

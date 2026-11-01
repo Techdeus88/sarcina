@@ -47,12 +47,6 @@ test('triggers are normalized to lists', function()
     h.eq(factory.triggers({ repo = 'x/y' }), nil)
 end)
 
-test('a lazy plugin installs to the opt pack dir', function()
-    local tasks = factory.generate({ repo = 'x/y', ft = 'lua' })
-    h.eq(find(tasks, 'install').opt, true)
-    h.eq(find(tasks, 'load_trigger').deferred[1].opt, true)
-end)
-
 test(
     'triggers = false keeps a plugin eager',
     function()
@@ -161,12 +155,6 @@ test('opts fail when the main module has no setup', function()
     package.loaded.nosetup = nil
     h.eq(ok, false)
     h.ok(err:find('has no setup()', 1, true), err)
-end)
-
-test('carries opt onto install and rtp', function()
-    local tasks = factory.generate({ repo = 'x/y', opt = true })
-    h.eq(find(tasks, 'install').opt, true)
-    h.eq(find(tasks, 'rtp').opt, true)
 end)
 
 return tests

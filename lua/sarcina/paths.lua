@@ -3,11 +3,10 @@
 
 local M = {}
 
-function M.pack_dir(opt)
-    return vim.fn.stdpath('data') .. '/site/pack/sarcina/' .. (opt and 'opt/' or 'start/')
-end
+-- Outside every 'packpath' entry, so Neovim never loads these on its own.
+function M.plugins_dir() return vim.fn.stdpath('data') .. '/sarcina/plugins/' end
 
-function M.install(name, opt) return M.pack_dir(opt) .. name end
+function M.install(name) return M.plugins_dir() .. name end
 
 function M.staging(name)
     return string.format('%s/sarcina_staging/%s_%d', vim.fn.stdpath('cache'), name, vim.uv.hrtime())
