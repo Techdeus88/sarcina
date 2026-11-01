@@ -23,7 +23,7 @@ test('an eager plugin orders every phase', function()
         config = 'c',
         after = 'd',
     })
-    h.eq(h.ids(tasks), { 'before', 'install', 'build', 'rtp', 'load', 'after' })
+    h.eq(h.ids(tasks), { 'install', 'before', 'build', 'rtp', 'load', 'after' })
 end)
 
 test('a lazy plugin defers rtp, load and after into the trigger task', function()
@@ -35,10 +35,16 @@ test('a lazy plugin defers rtp, load and after into the trigger task', function(
         config = 'c',
         after = 'd',
     })
-    h.eq(h.ids(tasks), { 'before', 'install', 'build', 'load_trigger' })
+    h.eq(h.ids(tasks), { 'install', 'before', 'build', 'load_trigger' })
     local trigger = find(tasks, 'load_trigger')
     h.eq(h.ids(trigger.deferred), { 'rtp', 'load', 'after' })
     h.eq(trigger.triggers, { event = { 'BufRead' } })
+end)
+
+test('the install task is marked as the install phase and comes before init', function()
+    local tasks = factory.generate({ repo = 'x/y', init = h.noop })
+    h.eq(find(tasks, 'install').phase, 'install')
+    h.eq(h.ids(tasks), { 'install', 'before', 'rtp' })
 end)
 
 test('triggers are normalized to lists', function()

@@ -22,6 +22,7 @@ function M.reset()
     tasks._jobs, tasks._plugins, tasks._order = {}, {}, {}
     tasks._running, tasks._started, tasks._callbacks = 0, false, {}
     tasks.max_concurrent = 4
+    tasks.max_installs = 8
     require('sarcina.scheduler').clear_all()
     _G.lazy_log = nil
     local ui = require('sarcina.ui')

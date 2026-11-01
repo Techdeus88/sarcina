@@ -158,6 +158,9 @@ function M.validate_task(task)
     if task.script and not is_string(task.script) then
         return fail(string.format('Task %s: `script` must be a string.', task.id))
     end
+    if task.phase ~= nil and task.phase ~= 'install' then
+        return fail(string.format('Task %s: `phase` must be "install".', task.id))
+    end
     if task.per_commit ~= nil and type(task.per_commit) ~= 'boolean' then
         return fail(string.format('Task %s: `per_commit` must be a boolean.', task.id))
     end

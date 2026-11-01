@@ -98,7 +98,7 @@ local function load_task(spec)
     end, spec.opts)
 end
 
--- Task order: before, install, build, then rtp, load, keys, after. A lazy plugin swaps the last four
+-- Task order: install, before, build, then rtp, load, keys, after. A lazy plugin swaps the last four
 -- for one load_trigger task that carries them and runs them when a trigger fires.
 function M.generate(spec)
     local triggers = spec.triggers
@@ -106,10 +106,12 @@ function M.generate(spec)
     local lazy = type(triggers) == 'table'
     local tasks = {}
 
+    if spec.repo then
+        table.insert(tasks, { id = 'install', type = 'git_clone', repo = spec.repo, phase = 'install' })
+    end
+
     local before = spec.init or spec.before
     if before then table.insert(tasks, lua_task('before', before)) end
-
-    if spec.repo then table.insert(tasks, { id = 'install', type = 'git_clone', repo = spec.repo }) end
 
     if spec.build then table.insert(tasks, build_task(spec.build)) end
 

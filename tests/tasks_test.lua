@@ -165,6 +165,111 @@ test('never runs more plugins at once than max_concurrent', function()
     h.eq(peak, 2)
 end)
 
+-- Install jobs that last `ms`, tracking how many run at once and when each ends.
+local function install_tracker(log)
+    local state = { running = 0, peak = 0 }
+    executors.t_install = function(job, done)
+        state.running = state.running + 1
+        state.peak = math.max(state.peak, state.running)
+        vim.defer_fn(function()
+            state.running = state.running - 1
+            table.insert(log, 'installed:' .. job.plugin)
+            if job.spec.fail then return done(false, 'no network') end
+            done(true)
+        end, job.spec.ms or 30)
+    end
+    return state
+end
+
+local function install(extra)
+    return vim.tbl_extend('force', { id = 'install', type = 't_install', phase = 'install' }, extra or {})
+end
+
+test('installs run together, beyond max_concurrent, up to max_installs', function()
+    local state = install_tracker({})
+    tasks.max_concurrent = 2
+    tasks.max_installs = 5
+    local plugins = {}
+    for i = 1, 8 do
+        table.insert(plugins, { name = 'p' .. i, tasks = { install() } })
+    end
+    h.run(plugins)
+    h.eq(state.peak, 5)
+end)
+
+test('installs do not wait for the plugins they depend on', function()
+    local state = install_tracker({})
+    h.run({
+        { name = 'app', deps = { 'lib' }, tasks = { install() } },
+        { name = 'lib', tasks = { install() } },
+    })
+    h.eq(state.peak, 2)
+end)
+
+test('no other task starts until every install has finished', function()
+    local log = {}
+    install_tracker(log)
+    h.run({
+        {
+            name = 'fast',
+            tasks = {
+                install({ ms = 5 }),
+                h.lua('after_install', function() table.insert(log, 'ran:fast') end),
+            },
+        },
+        {
+            name = 'slow',
+            tasks = {
+                install({ ms = 80 }),
+                h.lua('after_install', function() table.insert(log, 'ran:slow') end),
+            },
+        },
+    })
+    h.eq(log, { 'installed:fast', 'installed:slow', 'ran:fast', 'ran:slow' })
+end)
+
+test('after the installs, dependencies still run before their dependents', function()
+    local log = {}
+    install_tracker(log)
+    h.run({
+        {
+            name = 'app',
+            deps = { 'lib' },
+            tasks = { install(), h.lua('go', function() table.insert(log, 'go:app') end) },
+        },
+        { name = 'lib', tasks = { install(), h.lua('go', function() table.insert(log, 'go:lib') end) } },
+    })
+    h.eq(vim.list_slice(log, 3), { 'go:lib', 'go:app' })
+end)
+
+test('a failed install skips only that plugin, and the others still run', function()
+    local log = {}
+    install_tracker(log)
+    local summary = h.run({
+        {
+            name = 'bad',
+            tasks = { install({ fail = true }), h.lua('go', function() table.insert(log, 'go:bad') end) },
+        },
+        { name = 'good', tasks = { install(), h.lua('go', function() table.insert(log, 'go:good') end) } },
+    })
+    h.eq(h.job('bad', 'install').status, 'failed')
+    h.eq(h.job('bad', 'go').status, 'skipped')
+    h.eq(vim.tbl_contains(log, 'go:good'), true)
+    h.eq(vim.tbl_contains(log, 'go:bad'), false)
+    h.eq(summary.failed, 1)
+end)
+
+test('a plugin whose dependency failed to install is skipped after the installs', function()
+    install_tracker({})
+    h.run({
+        { name = 'lib', tasks = { install({ fail = true }) } },
+        { name = 'app', deps = { 'lib' }, tasks = { install(), h.lua('go', h.noop) } },
+    })
+    h.eq(h.job('app', 'install').status, 'done')
+    h.eq(h.job('app', 'go').status, 'skipped')
+    h.eq(h.job('app', 'go').note, 'dependency lib failed')
+end)
+
 test('runs different plugins in parallel', function()
     local running, peak = 0, 0
     executors.t_par = function(_, done)

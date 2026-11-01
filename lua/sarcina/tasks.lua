@@ -10,6 +10,7 @@ local executors = require('sarcina.executors')
 local uv = vim.uv
 
 M.max_concurrent = 4
+M.max_installs = 8
 
 M._jobs = {}
 M._plugins = {}
@@ -110,6 +111,21 @@ local function dependency_state(plugin)
     return 'ready'
 end
 
+local function is_install(job) return job.spec.phase == 'install' end
+
+-- True while any plugin is about to run or is running an install job. Nothing else starts then.
+local function installs_in_flight()
+    for _, name in ipairs(M._order) do
+        local plugin = M._plugins[name]
+        if plugin.running then
+            if is_install(plugin.jobs[plugin.next - 1]) then return true end
+        elseif plugin.next <= #plugin.jobs and is_install(plugin.jobs[plugin.next]) then
+            return true
+        end
+    end
+    return false
+end
+
 -- Counts the jobs added since the last summary, so an appended run reports only itself.
 local function summarize()
     local summary = { total = 0, done = 0, failed = 0, skipped = 0 }
@@ -199,20 +215,28 @@ local function start(plugin)
     run_job(plugin, job)
 end
 
+-- Installs go first: every install job starts at once, whatever its plugin depends on, and no other
+-- job starts until all of them have finished.
 function pump()
     if not M._started then return end
     local skipped
     repeat
         skipped = false
+        local installing = installs_in_flight()
+        local limit = installing and M.max_installs or M.max_concurrent
         for _, name in ipairs(M._order) do
             local plugin = M._plugins[name]
             if not plugin.running and plugin.next <= #plugin.jobs then
-                local state, dep = dependency_state(plugin)
-                if state == 'failed' then
-                    skip_rest(plugin, 'dependency ' .. dep .. ' failed')
-                    skipped = true
-                elseif state == 'ready' and M._running < M.max_concurrent then
-                    start(plugin)
+                if is_install(plugin.jobs[plugin.next]) then
+                    if M._running < limit then start(plugin) end
+                elseif not installing then
+                    local state, dep = dependency_state(plugin)
+                    if state == 'failed' then
+                        skip_rest(plugin, 'dependency ' .. dep .. ' failed')
+                        skipped = true
+                    elseif state == 'ready' and M._running < limit then
+                        start(plugin)
+                    end
                 end
             end
         end
