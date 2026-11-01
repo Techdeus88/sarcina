@@ -38,21 +38,21 @@ test('plugins are counted by timing, dependencies included, and the counts add u
 end)
 
 test(
-    'a now plugin is loaded at once, a later one after the wait, a lazy one only after its trigger',
+    'a now plugin is loaded at once, a later one after the wait, a triggered one only after its trigger',
     function()
         installed('stsnow.nvim', 'stsnow')
         installed('stslater.nvim', 'stslater')
-        installed('stslazy.nvim', 'stslazy')
+        installed('ststrig.nvim', 'ststrig')
         begin({
             { name = 'stsnow.nvim', repo = 'x/stsnow', load = 'now', opts = {} },
             { name = 'stslater.nvim', repo = 'x/stslater', opts = {} },
-            { name = 'stslazy.nvim', repo = 'x/stslazy', cmd = 'StatsLazyCmd', opts = {} },
+            { name = 'ststrig.nvim', repo = 'x/ststrig', cmd = 'StatsTrigCmd', opts = {} },
         })
         h.eq({ stats.get().loaded, stats.get().not_loaded }, { 1, 2 })
         h.ok(tasks.wait(2000))
         h.eq({ stats.get().loaded, stats.get().not_loaded }, { 2, 1 })
-        scheduler.load('stslazy.nvim')
-        h.ok(vim.wait(2000, function() return scheduler.state('stslazy.nvim') == 'loaded' end))
+        scheduler.load('ststrig.nvim')
+        h.ok(vim.wait(2000, function() return scheduler.state('ststrig.nvim') == 'loaded' end))
         h.ok(tasks.wait(2000))
         h.eq({ stats.get().loaded, stats.get().not_loaded }, { 3, 0 })
     end
@@ -111,6 +111,9 @@ local function run_child()
         "vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()",
         '    vim.defer_fn(function()',
         "        require('sarcina.tasks').wait(5000)",
+        "        vim.cmd('StatsChildCmd')",
+        "        vim.wait(3000, function() return require('sarcina.scheduler').state('stctrig.nvim') == 'loaded' end)",
+        "        require('sarcina.tasks').wait(5000)",
         "        io.stdout:write(vim.json.encode(require('sarcina').stats()))",
         '        vim.cmd.qa({ bang = true })',
         '    end, 100)',
@@ -122,32 +125,39 @@ local function run_child()
     return vim.json.decode(res.stdout)
 end
 
-test('in a real startup the numbers cover now, later and triggered plugins', function()
-    for _, name in ipairs({ 'stcnow.nvim', 'stclater.nvim', 'stctrig.nvim' }) do
-        vim.fn.mkdir(paths.install(name), 'p')
+test(
+    'in a real startup the numbers cover now, later and triggered plugins, and a command loads its plugin',
+    function()
+        for _, name in ipairs({ 'stcnow.nvim', 'stclater.nvim', 'stctrig.nvim' }) do
+            vim.fn.mkdir(paths.install(name), 'p')
+        end
+        vim.fn.mkdir(paths.install('stctrig.nvim') .. '/plugin', 'p')
+        vim.fn.writefile({
+            "vim.api.nvim_create_user_command('StatsChildCmd', function() vim.g.stats_child_cmd = true end, {})",
+        }, paths.install('stctrig.nvim') .. '/plugin/stctrig.lua')
+        local specs = vim.fn.stdpath('config') .. '/lua/plugins'
+        vim.fn.mkdir(specs, 'p')
+        local file = specs .. '/stats_child.lua'
+        vim.fn.writefile({
+            'return {',
+            "    { name = 'stcnow.nvim', repo = 'x/stcnow', load = 'now', config = function() end },",
+            "    { name = 'stclater.nvim', repo = 'x/stclater', config = function() end },",
+            "    { name = 'stctrig.nvim', repo = 'x/stctrig', cmd = 'StatsChildCmd', config = function() end },",
+            '}',
+        }, file)
+        local numbers = run_child()
+        vim.fn.delete(file)
+        h.eq(vim.tbl_extend('force', numbers, { startup_ms = 'set' }), {
+            count = 3,
+            loaded = 3,
+            not_loaded = 0,
+            now = 1,
+            later = 1,
+            triggered = 1,
+            startup_ms = 'set',
+        })
+        h.eq(type(numbers.startup_ms), 'number')
     end
-    local specs = vim.fn.stdpath('config') .. '/lua/plugins'
-    vim.fn.mkdir(specs, 'p')
-    local file = specs .. '/stats_child.lua'
-    vim.fn.writefile({
-        'return {',
-        "    { name = 'stcnow.nvim', repo = 'x/stcnow', load = 'now', config = function() end },",
-        "    { name = 'stclater.nvim', repo = 'x/stclater', config = function() end },",
-        "    { name = 'stctrig.nvim', repo = 'x/stctrig', cmd = 'StatsChildCmd', config = function() end },",
-        '}',
-    }, file)
-    local numbers = run_child()
-    vim.fn.delete(file)
-    h.eq(vim.tbl_extend('force', numbers, { startup_ms = 'set' }), {
-        count = 3,
-        loaded = 2,
-        not_loaded = 1,
-        now = 1,
-        later = 1,
-        triggered = 1,
-        startup_ms = 'set',
-    })
-    h.eq(type(numbers.startup_ms), 'number')
-end)
+)
 
 return tests

@@ -44,8 +44,9 @@ local function loaded_plugins()
     return loaded
 end
 
---- The public numbers. `now`, `later` and `triggered` count configured timings, so they add up to
---- `count`. `startup_ms` is absent until the UI is up.
+--- The public numbers. `now` (eager), `later` (lazy) and `triggered` (loads when its event, ft, cmd or
+--- keys fires) count plugins by configured timing, so they add up to `count`. `startup_ms` is absent
+--- until the UI is up.
 function M.get()
     local stats = { count = 0, loaded = 0, not_loaded = 0, now = 0, later = 0, triggered = 0 }
     local loaded = loaded_plugins()

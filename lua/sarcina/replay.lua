@@ -17,6 +17,8 @@ local function pattern_matches(pattern, match)
     return vim.fn.match(match or '', vim.fn.glob2regpat(pattern)) >= 0
 end
 
+M.matches = pattern_matches
+
 local function autocmd_key(au)
     return au.id or table.concat({ tostring(au.group), au.pattern, tostring(au.command) }, '\0')
 end

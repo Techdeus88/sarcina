@@ -16,7 +16,7 @@ lua/sarcina/
 ├── track.lua         stamps every task's created, started, ended and duration; keeps the session history
 ├── stats.lua         the public numbers: count, loaded, now, later, triggered, startup_ms
 ├── executors.lua     one function per task type (git_clone, rtp, lua, cmd, shell, keymaps, trigger, make)
-├── scheduler.lua     lazy-load stubs and deferred loading for plugin triggers
+├── scheduler.lua     stubs and deferred loading for triggered plugins
 ├── keys.lua          parses `keys` entries into a lhs, an rhs, a mode and options
 ├── load.lua          when code runs: now, later, now_if_args, event, ft, keys and cmd, all under safely
 ├── replay.lua        repeats the command, key or event that woke a plugin, after it loads
@@ -59,10 +59,10 @@ return {
 | `config` | called as `config(plugin, opts)` with `plugin = { name, dir }` |
 | `opts` | a table, or a `function(plugin, opts)` that returns one or fills in the empty table it is given. Handed to `config(plugin, opts)`, or to `require(module).setup(opts)` when there is no `config` |
 | `main` | the module to require; found from the plugin name when missing |
-| `event`, `ft`, `cmd`, `keys` | lazy-load triggers. A `keys` entry is `'lhs'` or `{ lhs, rhs, mode = 'n', desc = ..., <keymap options> }`; with an `rhs`, sarcina defines the mapping when the plugin loads |
+| `event`, `ft`, `cmd`, `keys` | triggers: the plugin loads when one fires. A `keys` entry is `'lhs'` or `{ lhs, rhs, mode = 'n', desc = ..., <keymap options> }`; with an `rhs`, sarcina defines the mapping when the plugin loads |
 | `tasks` | an explicit task list, which skips the generated one |
 
-Every plugin, lazy or not, is cloned to `stdpath('data')/sarcina/plugins/<name>`. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs. For a `now` plugin that is inside `setup()`, so Neovim sources its `plugin/` files in its own startup pass.
+Every plugin is cloned to `stdpath('data')/sarcina/plugins/<name>`. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs. For a `now` plugin that is inside `setup()`, so Neovim sources its `plugin/` files in its own startup pass.
 
 A `build` that succeeds records the plugin's commit in `.git/sarcina-build` inside the plugin directory, and later runs skip it while `HEAD` still matches (`build` shows `up to date`). A new commit from an update or a manual `git pull` runs it again. A build that fails leaves no record, so it runs again on the next launch. To force a rebuild, delete that file.
 
@@ -76,9 +76,9 @@ Every plugin has a timing. The resolver sets it, and `entry.timing` carries it.
 
 | Timing | The plugin loads |
 | --- | --- |
-| `now` | inside `setup()`, before `VimEnter` and `UIEnter`, in the order received |
-| `later` | in the background once the UI is up, starting in the order received. This is the default |
-| on a trigger | when its `event`, `ft`, `cmd` or `keys` fires (see [Lazy loading](#lazy-loading)) |
+| `now` (eager) | inside `setup()`, before `VimEnter` and `UIEnter`, in the order received |
+| `later` (lazy) | in the background once the UI is up, starting in the order received. This is the default |
+| triggered | when its `event`, `ft`, `cmd` or `keys` fires (see [Triggers](#triggers)) |
 
 - `load = 'now_if_args'` is `now` when Neovim was started with file arguments, and `later` otherwise.
 - A plugin with triggers loads on them. `load` only picks the time for a plugin without triggers, except that `load = 'now'` wins and drops the triggers.
@@ -90,7 +90,8 @@ Every plugin has a timing. The resolver sets it, and `entry.timing` carries it.
 1. Resolve the manifest.
 2. Run the `init` hook of every installed plugin.
 3. Load every installed `now` plugin whose dependencies loaded: `rtp`, `config` or `opts`, `keys`, `after`. A failure is recorded, skips the rest of that plugin and its dependents, and is reported once the UI is up.
-4. Queue everything else, and start it when the UI is up (when `VimEnter` fires if there is no UI): installs first, then builds, then the `later` plugins and the stubs of the lazy ones.
+4. Arm the stubs of every installed triggered plugin, so the first buffer that Neovim reads after `init.lua` can wake it.
+5. Queue everything else, and start it when the UI is up (when `VimEnter` fires if there is no UI): installs first, then builds, then the `later` plugins and, for triggered plugins that were not installed yet, their stubs, which catch up with what already happened.
 
 A `now` plugin that is not installed yet cannot load before the UI, so on the first launch it is installed in the background and loads as soon as the installs are done.
 
@@ -122,13 +123,15 @@ The loaders are named like the spec fields. The stub is removed before the callb
 
 `later` callbacks run in the order received, one per tick, after `UIEnter`. Errors raised before the UI is up are held and shown after it.
 
-## Lazy loading
+## Triggers
 
-A spec with `event`, `ft`, `cmd` or `keys` is lazy. The resolver normalizes those fields into `spec.triggers`, and `triggers = false` forces a plugin to load eagerly.
+A spec with `event`, `ft`, `cmd` or `keys` is triggered: it loads when one fires. The resolver normalizes those fields into `spec.triggers`, and `triggers = false` forces a plugin to load eagerly.
 
-- A lazy plugin only clones, builds, and registers stubs for its triggers once the UI is up. The `load_trigger` row reads `waiting for :Telescope`.
+- A triggered plugin only registers stubs for its triggers. When it is installed they exist as soon as `setup()` returns, so `nvim file.lua` wakes an `event` or `ft` trigger for its first buffer. The `load_trigger` row reads `waiting for :Telescope`.
+- A plugin that is not installed yet registers its stubs once it is cloned, after the first buffer was read. It then catches up and loads at once if a trigger already happened: a loaded buffer whose filetype matches an `ft` trigger, a file buffer whose name matches a `BufRead`, `BufReadPre`, `BufReadPost`, `BufEnter`, `BufWinEnter`, `BufAdd` or `BufNew` trigger, or a `VimEnter` or `UIEnter` that already fired. The plugin's own handlers replay for the first such buffer. Commands, keys and other events, such as `User` ones, can only be started by the user.
+- A plugin that is loading or loaded keeps no stubs, so registering it again, as `:Sarcina install` does, does not re-arm it.
 - The first trigger to fire removes every stub, then runs the plugin's `rtp`, `load` and `after` tasks through the task runner, so a failed config shows up in the panel like any other failure.
-- Lazy dependencies load first. A `now` or `later` plugin pulls its dependencies in at the same time, transitively.
+- Triggered dependencies load first. A `now` or `later` plugin pulls its dependencies in at the same time, transitively.
 - Afterwards the trigger replays. A command runs again with its args, bang and range. A key is fed again. An event runs only the autocmds the plugin added, so other plugins' handlers do not fire twice.
 - `event` takes `'BufRead'` or `'User Foo'`, with an optional pattern after the event name.
 
@@ -144,12 +147,14 @@ require('sarcina').stats()
 | Field | Is |
 | --- | --- |
 | `count` | plugins in the manifest |
-| `now`, `later`, `triggered` | plugins by timing, after dependency promotion, so they add up to `count`. They are configured timings, not how a plugin actually loaded |
+| `now`, `later`, `triggered` | plugins by configured timing, after dependency promotion, so they add up to `count`. `now` plugins are eager and load before the UI, `later` plugins load after it, and `triggered` plugins load when their `event`, `ft`, `cmd` or `keys` fires |
 | `loaded` | plugins whose `rtp` task is done and none of whose tasks failed at their latest run |
-| `not_loaded` | `count - loaded`, which includes lazy plugins that have not fired a trigger yet |
+| `not_loaded` | `count - loaded`, which includes `later` plugins still waiting and `triggered` plugins that have not fired yet |
 | `startup_ms` | milliseconds from the start of `setup()` to `UIEnter` (`VimEnter` when no UI attaches). Absent until then. It leaves out Neovim's own startup and your config before `setup()`; `nvim --startuptime` covers that |
 
 A plugin whose `load` fails after its `rtp`, or whose queued build fails, counts as not loaded. A plugin with explicit `tasks` counts as loaded only if one of them has `type = 'rtp'`.
+
+To look at every tracked time, run `:lua vim.print(require('sarcina.stats').tasks())`.
 
 `require('sarcina.stats').tasks()` lists every task of the session with `plugin`, `id`, `type`, `status`, `attempts`, `note`, `error` and its `meta`, and with times in milliseconds since `setup()` began: `created`, `started`, `ended`, `duration` (end minus start) and `waited` (start minus creation, the time spent behind the install barrier or a dependency). A task that never ran has only `created`.
 
@@ -172,7 +177,7 @@ A plugin whose `load` fails after its `rtp`, or whose queued build fails, counts
 - A task with `when = '<lua expression>'` is dropped from the queue when the expression is false.
 - Executors are `function(job, done, report)`. They call `done(ok, msg)` once and `report(line)` for live output. The runner owns every status change, so an executor cannot leave a task stuck in `running`.
 
-`tasks.enqueue(name, spec, { append = true })` and `tasks.run_all(cb, { append = true })` add to the job list instead of starting a new one, and the summary then counts only the jobs added since the last one. The scheduler uses this for lazy loads.
+`tasks.enqueue(name, spec, { append = true })` and `tasks.run_all(cb, { append = true })` add to the job list instead of starting a new one, and the summary then counts only the jobs added since the last one. The scheduler uses this for the loads that triggers start.
 
 Every job is stamped by `track` when it is created, started and finished: `created`, `started` and `ended` (hrtime, ns) and `duration` (ms, from the first start, retries included). A fresh run replaces `snapshot()` but not `track.history()`, which keeps every job of the session.
 
@@ -183,7 +188,7 @@ Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.sn
 The panel renders `tasks.snapshot()` and keeps no state of its own, so it cannot drift from the engine. It opens when a run lasts longer than `ui.show_delay` (250 ms) or when a failure appears, and closes `ui.close_delay` (3 s) after a run once nothing has failed. A failure keeps it open. `q` or closing the window dismisses it, and `:Sarcina panel` brings it back.
 
 - A running row shows git's latest line cut to the window width, so the panel keeps one height while output streams. A finished row wraps its error in full.
-- A lazy load appends its rows to the current list instead of replacing it. Failures from earlier in the session stay on screen, and the plugin's `rtp` and `load` rows are added at the end of the list. With nothing running, the cursor sits on the newest failure.
+- A load that a trigger starts appends its rows to the current list instead of replacing it. Failures from earlier in the session stay on screen, and the plugin's `rtp` and `load` rows are added at the end of the list. With nothing running, the cursor sits on the newest failure.
 - A dismissed panel stays closed through later runs and reopens only for a failure it has not shown yet.
 - Starting a fresh run, such as `:Sarcina install` after a finished one, replaces the list.
 

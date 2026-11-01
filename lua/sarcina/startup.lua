@@ -1,7 +1,9 @@
 -- sarcina/startup.lua
 -- Splits a resolved manifest into what runs before the UI and what runs after it. An installed
 -- plugin gets its `init` hook at once. An installed `now` plugin also loads at once, when everything
--- it depends on has. The rest, installs and builds included, is queued and runs once the UI is up.
+-- it depends on has. An installed triggered plugin arms its stubs at once, because Neovim reads the
+-- first buffer right after init and an event or filetype trigger armed later would miss it. The rest,
+-- installs and builds included, is queued and runs once the UI is up.
 
 local load = require('sarcina.load')
 local paths = require('sarcina.paths')
@@ -27,7 +29,7 @@ local function split(entry, loaded)
     local now_loads = entry.timing == 'now' and deps_loaded(entry.spec, loaded)
     local inline, remaining = {}, {}
     for _, task in ipairs(entry.spec.tasks) do
-        if task.id == 'before' or (now_loads and LOADING[task.id]) then
+        if task.id == 'before' or task.id == 'load_trigger' or (now_loads and LOADING[task.id]) then
             table.insert(inline, task)
         elseif task.id ~= 'install' then -- the install is already on disk
             table.insert(remaining, task)

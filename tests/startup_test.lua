@@ -84,7 +84,7 @@ test('a build waits for the UI even for a now plugin', function()
     h.eq(_G.start_log, { 'setup:stbuilt.nvim', 'build' })
 end)
 
-test('a plugin with a trigger runs its init at once and registers its stub later', function()
+test('a plugin with a trigger runs its init and arms its stub at once, and loads nothing', function()
     installed('sttrig.nvim', 'sttrig')
     begin({
         {
@@ -96,10 +96,11 @@ test('a plugin with a trigger runs its init at once and registers its stub later
         },
     })
     h.eq(_G.start_log, { 'init:sttrig' })
-    h.eq(vim.fn.exists(':StartTrigCmd'), 0)
-    h.ok(tasks.wait(2000))
     h.eq(vim.fn.exists(':StartTrigCmd'), 2)
     h.eq(scheduler.state('sttrig.nvim'), 'waiting')
+    h.ok(tasks.wait(2000))
+    h.eq(vim.fn.exists(':StartTrigCmd'), 2)
+    h.eq(_G.start_log, { 'init:sttrig' })
 end)
 
 test('a now plugin that fails to load fails alone, with one toast and its dependents skipped', function()

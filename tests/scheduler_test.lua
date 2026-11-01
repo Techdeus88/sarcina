@@ -192,6 +192,70 @@ test('any trigger defines the mappings of the keys with an rhs', function()
     pcall(vim.keymap.del, 'n', '<F7>')
 end)
 
+test('a filetype trigger armed late catches up with a buffer that is already open', function()
+    local extra =
+        "vim.api.nvim_create_autocmd('FileType', { group = vim.api.nvim_create_augroup('catchft_test', { clear = true }), pattern = 'catchft', callback = function() table.insert(_G.lazy_log, 'ft-handler') end })"
+    fixture_plugin('catchft.nvim', 'catchft', extra)
+    vim.cmd('new')
+    vim.bo.filetype = 'catchft'
+    start({ { name = 'catchft.nvim', ft = 'catchft', opts = {} } })
+    h.ok(loaded('catchft.nvim'))
+    vim.cmd('bwipeout!')
+    pcall(vim.api.nvim_del_augroup_by_name, 'catchft_test')
+    h.eq(log(), { 'setup:catchft.nvim', 'ft-handler' })
+end)
+
+test('an event trigger armed late catches up with an open file buffer and replays its handler', function()
+    local extra =
+        "vim.api.nvim_create_autocmd('BufRead', { group = vim.api.nvim_create_augroup('catchev_test', { clear = true }), callback = function() table.insert(_G.lazy_log, 'read-handler') end })"
+    fixture_plugin('catchev.nvim', 'catchev', extra)
+    local path = vim.fn.tempname() .. '.lua'
+    vim.fn.writefile({ 'x' }, path)
+    vim.cmd('edit ' .. vim.fn.fnameescape(path))
+    start({ { name = 'catchev.nvim', event = 'BufRead *.lua', opts = {} } })
+    h.ok(loaded('catchev.nvim'))
+    vim.cmd('bwipeout!')
+    vim.fn.delete(path)
+    pcall(vim.api.nvim_del_augroup_by_name, 'catchev_test')
+    h.eq(log(), { 'setup:catchev.nvim', 'read-handler' })
+end)
+
+test('a trigger armed late does not catch up when no open buffer matches', function()
+    fixture_plugin('catchmiss.nvim', 'catchmiss', '')
+    local path = vim.fn.tempname() .. '.lua'
+    vim.fn.writefile({ 'x' }, path)
+    vim.cmd('edit ' .. vim.fn.fnameescape(path))
+    start({
+        { name = 'catchmiss.nvim', event = 'BufRead *.rs', ft = 'rust', opts = {} },
+    })
+    vim.wait(100)
+    h.eq(scheduler.state('catchmiss.nvim'), 'waiting')
+    vim.cmd('bwipeout!')
+    vim.fn.delete(path)
+end)
+
+test('commands and keys never catch up, only a user action loads them', function()
+    fixture_plugin('catchcmd.nvim', 'catchcmd', '')
+    vim.cmd('new')
+    vim.bo.filetype = 'catchcmd'
+    start({
+        { name = 'catchcmd.nvim', cmd = 'CatchCmd', keys = { '<F2>' }, opts = {} },
+    })
+    vim.wait(100)
+    h.eq(scheduler.state('catchcmd.nvim'), 'waiting')
+    vim.cmd('bwipeout!')
+end)
+
+test('a plugin that is loaded is not armed again when it is registered again', function()
+    fixture_plugin('catchagain.nvim', 'catchagain', '')
+    start({ { name = 'catchagain.nvim', cmd = 'CatchAgainCmd', opts = {} } })
+    scheduler.load('catchagain.nvim')
+    h.ok(loaded('catchagain.nvim'))
+    scheduler.register('catchagain.nvim', { triggers = { cmd = { 'CatchAgainCmd' } }, deferred = {} })
+    h.eq(scheduler.state('catchagain.nvim'), 'loaded')
+    h.eq(vim.fn.exists(':CatchAgainCmd'), 0)
+end)
+
 test('loading a plugin loads its lazy dependencies first', function()
     local extra_a = "vim.api.nvim_create_user_command('DepA', function() end, {})"
     fixture_plugin('depb.nvim', 'depb', '')
