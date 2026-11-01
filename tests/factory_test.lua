@@ -72,6 +72,20 @@ test(
     function() h.eq(find(factory.generate({ repo = 'x/y', build = 'return 1' }), 'build').script, 'return 1') end
 )
 
+test('a string starting with a colon becomes an Ex command task', function()
+    local tasks =
+        factory.generate({ repo = 'x/y', build = ':RealIcons install', after = ':doautocmd User Done' })
+    h.eq(find(tasks, 'build'), { id = 'build', type = 'cmd', cmd = 'RealIcons install', per_commit = true })
+    h.eq(find(tasks, 'after').cmd, 'doautocmd User Done')
+end)
+
+test('only the build task is gated by the commit', function()
+    local tasks = factory.generate({ repo = 'x/y', init = h.noop, build = h.noop, after = h.noop })
+    h.eq(find(tasks, 'build').per_commit, true)
+    h.eq(find(tasks, 'before').per_commit, nil)
+    h.eq(find(tasks, 'after').per_commit, nil)
+end)
+
 test('hands opts to config as the second argument', function()
     local got
     local tasks = factory.generate({

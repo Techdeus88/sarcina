@@ -30,6 +30,17 @@ test(
     function() h.eq(schema.validate_task({ id = 'x', type = 'lua' }), false) end
 )
 
+test('schema accepts a cmd task and rejects one without a command', function()
+    h.eq(schema.validate_task({ id = 'x', type = 'cmd', cmd = 'Foo' }), true)
+    h.eq(schema.validate_task({ id = 'x', type = 'cmd' }), false)
+    h.eq(schema.validate_task({ id = 'x', type = 'cmd', cmd = 5 }), false)
+end)
+
+test('schema requires per_commit to be a boolean', function()
+    h.eq(schema.validate_task({ id = 'x', type = 'lua', fn = h.noop, per_commit = true }), true)
+    h.eq(schema.validate_task({ id = 'x', type = 'lua', fn = h.noop, per_commit = 'yes' }), false)
+end)
+
 test(
     'schema rejects the removed track type',
     function() h.eq(schema.validate_task({ id = 'x', type = 'track' }), false) end

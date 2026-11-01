@@ -48,7 +48,7 @@ return {
 | `repo`, or the first entry | what to clone |
 | `name` | plugin name; derived from the repo when missing |
 | `deps` | plugins that must finish first |
-| `init`, `build`, `after` | Lua string or function run before install, after install, and after load |
+| `init`, `build`, `after` | Lua string or function run before install, after install, and after load. A string starting with `:` runs as an Ex command instead, such as `build = ':TSUpdate'`. `build` runs only after a fresh clone or when the plugin's commit changes |
 | `config` | called as `config(plugin, opts)` with `plugin = { name, dir }` |
 | `opts` | handed to `require(module).setup(opts)` when there is no `config` |
 | `main` | the module to require; found from the plugin name when missing |
@@ -56,6 +56,10 @@ return {
 | `tasks` | an explicit task list, which skips the generated one |
 
 Every plugin, lazy or not, is cloned to `stdpath('data')/sarcina/plugins/<name>`. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs, which is after `VimEnter` unless your config calls `require('sarcina.tasks').wait()`.
+
+A `build` that succeeds records the plugin's commit in `.git/sarcina-build` inside the plugin directory, and later runs skip it while `HEAD` still matches (`build` shows `up to date`). A new commit from an update or a manual `git pull` runs it again. A build that fails leaves no record, so it runs again on the next launch. To force a rebuild, delete that file.
+
+An Ex command hook adds the plugin to `runtimepath` first, because the command usually comes from the plugin's own `plugin/` files. Sarcina sources those files only after `VimEnter`, so such a hook cannot find its command if you call `tasks.wait()` from `init.lua`.
 
 Without `main`, sarcina matches the plugin name, then the repo name, against the modules in the plugin's `lua/` directory, ignoring case, punctuation and `nvim` affixes. A lone module wins by default. If it cannot tell, the load task fails with the list of modules and asks you to set `main`.
 

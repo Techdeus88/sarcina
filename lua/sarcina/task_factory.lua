@@ -26,8 +26,11 @@ function M.triggers(spec)
     return triggers
 end
 
--- A string runs as a Lua chunk; a function is kept as a closure.
+-- A string runs as a Lua chunk, or as an Ex command when it starts with ':'; a function is kept as a closure.
 local function lua_task(id, value, opts)
+    if type(value) == 'string' and value:sub(1, 1) == ':' then
+        return { id = id, type = 'cmd', cmd = value:sub(2) }
+    end
     local task = { id = id, type = 'lua', opts = opts }
     if type(value) == 'function' then
         task.fn = value
@@ -85,7 +88,11 @@ function M.generate(spec)
 
     if spec.repo then table.insert(tasks, { id = 'install', type = 'git_clone', repo = spec.repo }) end
 
-    if spec.build then table.insert(tasks, lua_task('build', spec.build)) end
+    if spec.build then
+        local build = lua_task('build', spec.build)
+        build.per_commit = true
+        table.insert(tasks, build)
+    end
 
     local loading = { { id = 'rtp', type = 'rtp' } }
     local load = load_task(spec)

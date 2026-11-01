@@ -82,11 +82,12 @@ function M.make(job, done, report)
     run_cmd({ 'make' }, { cwd = cwd }, report, done)
 end
 
-function M.rtp(job, done)
-    local path = paths.install(job.plugin)
-    if not uv.fs_stat(path) then return done(false, 'plugin directory missing: ' .. path) end
+-- Returns false and why when the plugin directory is missing.
+local function add_to_rtp(name)
+    local path = paths.install(name)
+    if not uv.fs_stat(path) then return false, 'plugin directory missing: ' .. path end
     local rtp = vim.opt.rtp:get() --[[@as string[] ]]
-    if vim.tbl_contains(rtp, path) then return done(true) end
+    if vim.tbl_contains(rtp, path) then return true end
     -- Like a start/ package: the plugin joins the runtimepath, its after/ dir goes behind it.
     local dirs = { path }
     if uv.fs_stat(path .. '/after') then table.insert(dirs, path .. '/after') end
@@ -99,7 +100,17 @@ function M.rtp(job, done)
             source_plugin_files(dir)
         end
     end
-    done(true)
+    return true
+end
+
+function M.rtp(job, done) done(add_to_rtp(job.plugin)) end
+
+-- Runs `spec.cmd` as an Ex command. The plugin joins the runtimepath first, since its commands come
+-- from its plugin/ files; a hook that runs before the clone has no directory to add yet.
+function M.cmd(job, done)
+    add_to_rtp(job.plugin)
+    local ok, err = pcall(function() vim.cmd(job.spec.cmd) end)
+    done(ok, err)
 end
 
 -- Hands the triggers to the scheduler; the deferred rtp/config/after tasks run when one fires.
@@ -125,6 +136,51 @@ function M.lua(job, done)
     else
         done(false, err)
     end
+end
+
+-- A task with `per_commit` runs only when the plugin's HEAD differs from the commit it last succeeded
+-- at. The record sits in the plugin's .git, so a fresh clone has none and a failed run is retried.
+
+-- Calls cb(commit) on the main loop; commit is nil when the plugin has no readable HEAD.
+local function head_commit(name, cb)
+    local cmd = { 'git', '-C', paths.install(name), 'rev-parse', 'HEAD' }
+    local spawned = pcall(vim.system, cmd, { text = true }, function(res)
+        vim.schedule(function() cb(res.code == 0 and vim.trim(res.stdout) or nil) end)
+    end)
+    if not spawned then vim.schedule(cb) end
+end
+
+local function read_record(path)
+    local file = io.open(path, 'r')
+    if not file then return nil end
+    local commit = file:read('*l')
+    file:close()
+    return commit
+end
+
+local function write_record(path, commit)
+    local file = io.open(path, 'w')
+    if not file then return end
+    file:write(commit, '\n')
+    file:close()
+end
+
+local function per_commit(exec)
+    return function(job, done, report)
+        if not job.spec.per_commit then return exec(job, done, report) end
+        local record = paths.install(job.plugin) .. '/.git/sarcina-' .. job.id
+        head_commit(job.plugin, function(commit)
+            if commit and read_record(record) == commit then return done(true, 'up to date') end
+            exec(job, function(ok, msg)
+                if ok and commit then write_record(record, commit) end
+                done(ok, msg)
+            end, report)
+        end)
+    end
+end
+
+for _, kind in ipairs({ 'lua', 'cmd', 'make' }) do
+    M[kind] = per_commit(M[kind])
 end
 
 return M

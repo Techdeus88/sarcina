@@ -122,6 +122,7 @@ end
 local TASK_SPEC = {
     git_clone = { required = { 'repo' } },
     lua = { required = {} }, -- needs `script` or `fn`, checked below
+    cmd = { required = { 'cmd' } },
     rtp = { required = {} },
     trigger = { required = { 'triggers' } },
     make = { required = {} },
@@ -154,6 +155,12 @@ function M.validate_task(task)
     end
     if task.script and not is_string(task.script) then
         return fail(string.format('Task %s: `script` must be a string.', task.id))
+    end
+    if task.per_commit ~= nil and type(task.per_commit) ~= 'boolean' then
+        return fail(string.format('Task %s: `per_commit` must be a boolean.', task.id))
+    end
+    if task.cmd and not is_string(task.cmd) then
+        return fail(string.format('Task %s: `cmd` must be a string.', task.id))
     end
     if task.fn and not is_function(task.fn) then
         return fail(string.format('Task %s: `fn` must be a function.', task.id))

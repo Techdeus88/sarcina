@@ -15,18 +15,20 @@ local function layered_plugin(name)
     vim.fn.writefile({ 'vim.g.after_ran = vim.g.main_ran == true' }, dir .. '/after/plugin/after.lua')
 end
 
--- Runs the plugin's rtp task in a child Neovim, before startup finishes or after it, and reports the globals.
-local function run_child(name, before_startup)
+local RTP_TASK = "{ id = 'rtp', type = 'rtp' }"
+
+-- Runs one task of the plugin in a child Neovim, before startup finishes or after it, and reports the globals.
+local function run_child(name, task, before_startup)
     local script = vim.fn.tempname() .. '.lua'
     vim.fn.writefile({
         string.format('vim.opt.rtp:prepend(%q)', root),
         "local tasks = require('sarcina.tasks')",
-        string.format("tasks.enqueue(%q, { tasks = { { id = 'rtp', type = 'rtp' } } })", name),
+        string.format('tasks.enqueue(%q, { tasks = { %s } })', name, task),
         'tasks.run_all()',
         before_startup and 'tasks.wait(5000)' or '',
         "vim.api.nvim_create_autocmd('VimEnter', { callback = function()",
         '    tasks.wait(5000)',
-        '    io.stdout:write(vim.json.encode({ main = vim.g.main_ran, after = vim.g.after_ran }))',
+        '    io.stdout:write(vim.json.encode({ main = vim.g.main_ran, after = vim.g.after_ran, built = vim.g.built }))',
         '    vim.cmd.qa()',
         'end })',
     }, script)
@@ -38,12 +40,45 @@ end
 
 test('a late rtp task sources plugin/ and then after/plugin', function()
     layered_plugin('late.nvim')
-    h.eq(run_child('late.nvim', false), { main = true, after = true })
+    h.eq(run_child('late.nvim', RTP_TASK, false), { main = true, after = true })
 end)
 
 test('an rtp task before startup leaves plugin/ and after/plugin to Neovim', function()
     layered_plugin('early.nvim')
-    h.eq(run_child('early.nvim', true), { main = true, after = true })
+    h.eq(run_child('early.nvim', RTP_TASK, true), { main = true, after = true })
+end)
+
+test('a cmd task runs a command that the plugin defines in plugin/', function()
+    local dir = paths.install('cmd.nvim')
+    vim.fn.mkdir(dir .. '/plugin', 'p')
+    local define = "vim.api.nvim_create_user_command('CmdBuild', function() vim.g.built = true end, {})"
+    vim.fn.writefile({ define }, dir .. '/plugin/cmd.lua')
+    local task = "{ id = 'build', type = 'cmd', cmd = 'CmdBuild' }"
+    h.eq(run_child('cmd.nvim', task, false), { built = true })
+end)
+
+test('a cmd task passes its arguments through and puts the plugin on the runtimepath', function()
+    local dir = paths.install('args.nvim')
+    vim.fn.mkdir(dir, 'p')
+    vim.api.nvim_create_user_command(
+        'ArgsBuild',
+        function(opts) vim.g.build_args = opts.args end,
+        { nargs = '*' }
+    )
+    h.run({
+        { name = 'args.nvim', tasks = { { id = 'build', type = 'cmd', cmd = 'ArgsBuild install now' } } },
+    })
+    vim.api.nvim_del_user_command('ArgsBuild')
+    vim.opt.rtp:remove(dir)
+    h.eq(h.job('args.nvim', 'build').status, 'done')
+    h.eq(vim.g.build_args, 'install now')
+end)
+
+test('a failing cmd task reports the editor error', function()
+    h.run({ { name = 'nocmd.nvim', tasks = { { id = 'build', type = 'cmd', cmd = 'NoSuchSarcinaCmd' } } } })
+    local job = h.job('nocmd.nvim', 'build')
+    h.eq(job.status, 'failed')
+    h.ok(job.error:find('E492', 1, true), job.error)
 end)
 
 test('the after dir goes behind the plugin on the runtimepath', function()
