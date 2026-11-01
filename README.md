@@ -49,7 +49,7 @@ return {
 | `repo`, or the first entry | what to clone |
 | `name` | plugin name; derived from the repo when missing |
 | `deps` | plugins that must finish first |
-| `init`, `build`, `after` | run before install, after install, and after load. A function is called with `plugin = { name, dir }`. A string is a Lua chunk, except that a `build` string is a shell command run in the plugin directory (`build = 'make'`), and any string starting with `:` is an Ex command (`build = ':TSUpdate'`). `build` runs only after a fresh clone or when the plugin's commit changes |
+| `init`, `build`, `after` | `init` runs right after the install, `build` after that, and `after` once the plugin has loaded. A function is called with `plugin = { name, dir }`. A string is a Lua chunk, except that a `build` string is a shell command run in the plugin directory (`build = 'make'`), and any string starting with `:` is an Ex command (`build = ':TSUpdate'`). `build` runs only after a fresh clone or when the plugin's commit changes |
 | `config` | called as `config(plugin, opts)` with `plugin = { name, dir }` |
 | `opts` | a table, or a `function(plugin, opts)` that returns one or fills in the empty table it is given. Handed to `config(plugin, opts)`, or to `require(module).setup(opts)` when there is no `config` |
 | `main` | the module to require; found from the plugin name when missing |
@@ -87,6 +87,7 @@ Only the plugin's `plugin/` and `after/plugin/` files are sourced on a late load
 ## How the task engine works
 
 - Tasks for one plugin run in order. Plugins run in parallel, up to `tasks.max_concurrent` (default 4).
+- Installs go first. Every `install` task starts at once, whatever its plugin depends on, up to `tasks.max_installs` (default 8). No other task starts until all installs have finished. Then the rest of each plugin's tasks run, dependencies first.
 - A plugin starts only after the plugins in its `deps` have finished.
 - If a task fails, the rest of that plugin's tasks and every plugin that depends on it are marked `skipped`.
 - A task with `retries = n` runs up to `n + 1` times before it counts as failed.
