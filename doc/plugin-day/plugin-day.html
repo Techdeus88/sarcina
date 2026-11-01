@@ -1,0 +1,172 @@
+<title>A Day as demo.nvim</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@500;600&family=JetBrains+Mono:wght@400;500&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;1,6..72,400&display=swap">
+<style>
+/* Layout concept: a timeline of one plugin's day. Each moment stacks code, lifecycle and log lenses; the log is a terminal panel that mirrors sarcina's own. */
+:root {
+  --bg: #f2f5f8;
+  --fg: #1b2330;
+  --muted: #566272;
+  --rule: #d3dae3;
+  --accent: #2456cc;
+  --code-bg: #e6ebf1;
+  --term-bg: #0d131c;
+  --term-fg: #d7dfea;
+  --term-dim: #8493a5;
+  --term-rule: #243041;
+  --ok: #4cc38a;
+  --run: #6db3ff;
+  --fail: #ff7a7a;
+  --skip: #8493a5;
+  --font-body: 'Newsreader', Georgia, 'Times New Roman', serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+  --font-label: 'Instrument Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0c1118;
+    --fg: #e1e7ef;
+    --muted: #93a0b1;
+    --rule: #243040;
+    --accent: #84aaff;
+    --code-bg: #151d28;
+    --term-bg: #070b11;
+    --term-fg: #d7dfea;
+    --term-dim: #7f8ea1;
+    --term-rule: #1d2836;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #0c1118;
+  --fg: #e1e7ef;
+  --muted: #93a0b1;
+  --rule: #243040;
+  --accent: #84aaff;
+  --code-bg: #151d28;
+  --term-bg: #070b11;
+  --term-fg: #d7dfea;
+  --term-dim: #7f8ea1;
+  --term-rule: #1d2836;
+  color-scheme: dark;
+}
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-body);
+  font-size: 18px;
+  line-height: 1.6;
+  padding-block: 40px 72px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+}
+.wrap { max-width: 920px; margin-inline: auto; }
+code { font-family: var(--font-mono); font-size: 0.82em; background: var(--code-bg); padding: 0.1em 0.35em; border-radius: 3px; overflow-wrap: anywhere; }
+header { display: grid; gap: 14px; margin-bottom: 36px; }
+.eyebrow { font-family: var(--font-label); font-size: 12px; font-weight: 600; letter-spacing: 0.12em; text-transform: uppercase; color: var(--accent); }
+h1 { font-size: clamp(34px, 6vw, 54px); line-height: 1.08; font-weight: 600; letter-spacing: -0.01em; text-wrap: balance; }
+.lede { max-width: 62ch; font-size: 20px; color: var(--fg); }
+.provenance { max-width: 62ch; font-size: 15px; color: var(--muted); }
+.filter { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; font-family: var(--font-label); font-size: 13px; }
+.filter span { color: var(--muted); margin-right: 4px; }
+.filter button { font: inherit; font-weight: 500; color: var(--fg); background: transparent; border: 1px solid var(--rule); border-radius: 999px; padding: 5px 14px; cursor: pointer; }
+.filter button[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: var(--bg); }
+.filter button:focus-visible, a:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.timeline { display: grid; gap: 0; }
+.moment { display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 0 28px; padding-block: 34px; border-top: 1px solid var(--rule); }
+.when { font-family: var(--font-mono); font-size: 15px; font-weight: 500; color: var(--accent); padding-top: 6px; }
+.moment.before .when { font-family: var(--font-label); font-size: 12px; letter-spacing: 0.1em; text-transform: uppercase; padding-top: 10px; }
+.what { min-width: 0; display: grid; gap: 22px; border-left: 1px solid var(--rule); padding-left: 28px; }
+h2 { font-size: 28px; line-height: 1.2; font-weight: 600; text-wrap: balance; }
+.story { margin-top: -14px; color: var(--muted); font-style: italic; max-width: 62ch; }
+.lens { display: grid; gap: 8px; min-width: 0; }
+.lens-label { font-family: var(--font-label); font-size: 11px; font-weight: 600; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); }
+.lens-body { display: grid; gap: 14px; min-width: 0; }
+.lens-body p { max-width: 64ch; }
+.steps { max-width: 64ch; padding-left: 1.4em; display: grid; gap: 6px; }
+.steps li::marker { font-family: var(--font-mono); font-size: 0.85em; color: var(--accent); }
+.chips { list-style: none; display: flex; flex-wrap: wrap; gap: 8px; }
+.chips li { font-size: 15px; border: 1px solid var(--rule); border-radius: 6px; padding: 6px 12px; }
+.code { font-family: var(--font-mono); font-size: 13.5px; line-height: 1.6; background: var(--code-bg); border-radius: 6px; padding: 16px 18px; overflow-x: auto; max-width: 640px; }
+.frames { display: grid; gap: 14px; }
+.panel { margin: 0; max-width: 640px; min-width: 0; background: var(--term-bg); color: var(--term-fg); border: 1px solid var(--term-rule); border-radius: 8px; overflow: hidden; font-family: var(--font-mono); font-size: 13px; line-height: 1.55; }
+.panel-title { text-align: center; padding: 7px 12px; border-bottom: 1px solid var(--term-rule); color: var(--term-dim); font-size: 12px; }
+.panel-body { padding: 10px 16px 12px; overflow-x: auto; }
+.row { white-space: pre; }
+.row .g { display: inline-block; width: 1.4em; }
+.row.done .g { color: var(--ok); }
+.row.run .g { color: var(--run); }
+.row.pend .g { color: var(--skip); }
+.row.fail .g { color: var(--fail); }
+.row.skip .g { color: var(--skip); }
+.row.pend, .row.skip { color: var(--term-dim); }
+.row .note { color: var(--term-dim); margin-left: 0.9em; }
+.row.fail .note { color: var(--fail); }
+.term { margin: 0; padding: 12px 16px; overflow-x: auto; white-space: pre; font: inherit; }
+.cap { font-family: var(--font-label); font-size: 12px; color: var(--term-dim); padding: 8px 16px 10px; border-top: 1px solid var(--term-rule); }
+.toast { max-width: 640px; font-family: var(--font-mono); font-size: 13px; padding: 10px 16px; border-radius: 8px; background: var(--term-bg); color: var(--term-fg); border: 1px solid var(--term-rule); overflow-x: auto; white-space: pre; }
+.toast .lvl { color: var(--fail); font-weight: 500; margin-right: 0.8em; }
+.note-box { border-top: 1px solid var(--rule); padding-block: 34px 0; display: grid; gap: 12px; max-width: 64ch; margin-left: calc(112px + 28px); }
+.note-box h2 { font-size: 24px; }
+@media (max-width: 720px) {
+  body { font-size: 17px; padding-block: 28px 56px; }
+  .moment { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .what { border-left: 0; padding-left: 0; }
+  .when { padding-top: 0; }
+  .moment.before .when { padding-top: 0; }
+  .note-box { margin-left: 0; }
+}
+</style>
+<div class="wrap">
+  <header>
+    <div class="eyebrow">sarcina · one plugin, one day</div>
+    <h1>A Day as demo.nvim</h1>
+    <p class="lede">I am a plugin loaded by sarcina. This is what happens to me over four launches, seen from three sides: the code that acts on me, the stages I move through, and the text sarcina prints about it.</p>
+    <p class="provenance">Every log block is copied from a real headless run against two local git repos in a throwaway directory. Durations and hashes are from that run. The panel text was read from the panel buffer; in a live session it opens after 250 ms or when something fails.</p>
+    <div class="filter" role="group" aria-label="Show one lens">
+      <span>Show</span>
+      <button type="button" data-filter="all" aria-pressed="true">All</button>
+      <button type="button" data-filter="code" aria-pressed="false">Code</button>
+      <button type="button" data-filter="lifecycle" aria-pressed="false">Lifecycle</button>
+      <button type="button" data-filter="log" aria-pressed="false">Log</button>
+    </div>
+  </header>
+  <main class="timeline">
+    <section class="moment before"><div class="when">before launch</div><div class="what"><h2>Written into a spec</h2><p class="story">I am a lazy plugin. I have a command and a key, so I wait to be used. I also carry a dependency, a shell build and some options.</p><div class="lens" data-lens="code"><h3 class="lens-label">Code</h3><div class="lens-body"><pre class="code">-- lua/plugins/demo.lua
+return {
+  {
+    '/…/repos/demo.nvim',
+    deps = { { '/…/repos/util.nvim' } },       -- an inline spec
+    build = 'sleep 0.3 &amp;&amp; echo compiled &gt; built.txt',
+    cmd = 'Demo',
+    keys = { { '&lt;leader&gt;d', '&lt;cmd&gt;Demo&lt;cr&gt;', desc = 'Run the demo' } },
+    opts = { greeting = 'hello' },
+  },
+}</pre><p><code>manifest.load</code> reads my spec file once and expands the <code>{ 'path' }</code> shorthand into <code>repo</code>. The resolver derives my name from the repo path, lifts <code>util.nvim</code> out of my <code>deps</code> and rewrites <code>deps</code> to plain names, sorts dependencies first, sets my triggers from <code>cmd</code> and <code>keys</code>, and generates my tasks.</p></div></div><div class="lens" data-lens="lifecycle"><h3 class="lens-label">Lifecycle</h3><div class="lens-body"><p>I have <code>cmd</code> and <code>keys</code>, so I am lazy. My task list is three entries long.</p><ul class="chips"><li><code>install</code> git_clone</li><li><code>build</code> shell, once per commit</li><li><code>load_trigger</code> holds <code>rtp</code>, <code>load</code>, <code>keys</code></li></ul></div></div><div class="lens" data-lens="log"><h3 class="lens-label">Log</h3><div class="lens-body"><p>These four lines go only to <code>ui.on('debug')</code> listeners. They never become toasts.</p><figure class="panel"><pre class="term">Derived plugin name "demo.nvim" from repo "…/repos/demo.nvim"
+Derived plugin name "util.nvim" from repo "…/repos/util.nvim"
+Resolved 2 plugins (order respects dependencies)
+Starting bulk install of 2 plugins</pre></figure></div></div></div></section><section class="moment"><div class="when">09:00</div><div class="what"><h2>First launch, cold</h2><p class="story">Nothing of me exists on disk yet.</p><div class="lens" data-lens="code"><h3 class="lens-label">Code</h3><div class="lens-body"><p>My build task is <code>{ type = 'shell', per_commit = true }</code>. The wrapper in <code>executors.lua</code> runs <code>git rev-parse HEAD</code> and compares it with <code>.git/sarcina-build</code> before it runs anything.</p></div></div><div class="lens" data-lens="lifecycle"><h3 class="lens-label">Lifecycle</h3><div class="lens-body"><ol class="steps"><li><code>setup()</code> returns at once. The tasks run in the background.</li><li>I cannot start until <code>util.nvim</code> has finished, because I depend on it.</li><li><code>git_clone</code> clones me into a staging directory, then renames it to <code>stdpath('data')/sarcina/plugins/demo.nvim</code>.</li><li>The shell build runs in my directory.</li><li>It succeeds, so my commit hash is written to <code>.git/sarcina-build</code>.</li><li><code>load_trigger</code> arms two stubs: the <code>:Demo</code> command and the <code>&lt;leader&gt;d</code> key.</li><li>I am not on the runtimepath yet.</li></ol></div></div><div class="lens" data-lens="log"><h3 class="lens-label">Log</h3><div class="lens-body"><div class="frames"><figure class="panel"><div class="panel-title">Sarcina 0/5</div><div class="panel-body"><div class="row run"><span class="g">▶</span> util.nvim – install <span class="note">warning: --depth is ignored in local clones; use file://…</span></div><div class="row pend"><span class="g">…</span> util.nvim – rtp</div><div class="row pend"><span class="g">…</span> demo.nvim – install</div><div class="row pend"><span class="g">…</span> demo.nvim – build</div><div class="row pend"><span class="g">…</span> demo.nvim – load_trigger</div></div><figcaption class="cap">+24 ms. Git's own warning, because the plugin is a local path.</figcaption></figure><figure class="panel"><div class="panel-title">Sarcina 3/5</div><div class="panel-body"><div class="row done"><span class="g">✔</span> util.nvim – install</div><div class="row done"><span class="g">✔</span> util.nvim – rtp</div><div class="row done"><span class="g">✔</span> demo.nvim – install</div><div class="row run"><span class="g">▶</span> demo.nvim – build</div><div class="row pend"><span class="g">…</span> demo.nvim – load_trigger</div></div><figcaption class="cap">+111 ms. I start only after util.nvim is done.</figcaption></figure><figure class="panel"><div class="panel-title">Sarcina 5/5</div><div class="panel-body"><div class="row done"><span class="g">✔</span> util.nvim – install</div><div class="row done"><span class="g">✔</span> util.nvim – rtp</div><div class="row done"><span class="g">✔</span> demo.nvim – install</div><div class="row done"><span class="g">✔</span> demo.nvim – build <span class="note">0.3s</span></div><div class="row done"><span class="g">✔</span> demo.nvim – load_trigger <span class="note">waiting for :Demo, &lt;leader&gt;d</span></div></div><figcaption class="cap">The panel when startup is done.</figcaption></figure></div><p>Toasts: none. A clean <code>setup()</code> is silent.</p></div></div></div></section><section class="moment"><div class="when">09:05</div><div class="what"><h2>Someone types :Demo</h2><p class="story">The stub I left behind gets used.</p><div class="lens" data-lens="code"><h3 class="lens-label">Code</h3><div class="lens-body"><p><code>scheduler.load</code> does the claiming. The <code>keymaps</code> task defines my real mapping, which is why <code>&lt;leader&gt;d</code> survives losing its stub: sarcina owns the <code>rhs</code>.</p></div></div><div class="lens" data-lens="lifecycle"><h3 class="lens-label">Lifecycle</h3><div class="lens-body"><ol class="steps"><li>The <code>:Demo</code> stub fires.</li><li>The scheduler claims me and any dependency still waiting.</li><li>It removes every stub, so my other trigger cannot start a second load.</li><li>It appends <code>rtp</code>, <code>load</code> and <code>keys</code> to the current task list.</li><li>When the load succeeds, it replays the command.</li></ol></div></div><div class="lens" data-lens="log"><h3 class="lens-label">Log</h3><div class="lens-body"><figure class="panel"><pre class="term">demo says hello</pre><figcaption class="cap">The replayed command. <code>setup(opts)</code> has already run.</figcaption></figure><figure class="panel"><div class="panel-title">Sarcina 8/8</div><div class="panel-body"><div class="row done"><span class="g">✔</span> util.nvim – install</div><div class="row done"><span class="g">✔</span> util.nvim – rtp</div><div class="row done"><span class="g">✔</span> demo.nvim – install</div><div class="row done"><span class="g">✔</span> demo.nvim – build <span class="note">0.3s</span></div><div class="row done"><span class="g">✔</span> demo.nvim – load_trigger <span class="note">waiting for :Demo, &lt;leader&gt;d</span></div><div class="row done"><span class="g">✔</span> demo.nvim – rtp</div><div class="row done"><span class="g">✔</span> demo.nvim – load</div><div class="row done"><span class="g">✔</span> demo.nvim – keys</div></div><figcaption class="cap">Three rows appended to the same list.</figcaption></figure><p>Toasts: none. A successful lazy load stays quiet. Afterwards <code>&lt;leader&gt;d</code> maps to <code>&lt;cmd&gt;Demo&lt;cr&gt;</code> with the description "Run the demo".</p></div></div></div></section><section class="moment"><div class="when">13:00</div><div class="what"><h2>Second launch, warm</h2><p class="story">Nothing needs doing, and the log says so.</p><div class="lens" data-lens="code"><h3 class="lens-label">Code</h3><div class="lens-body"><p>No new code runs. The install task sees my directory and reports <code>already installed</code>. The per-commit gate sees that <code>HEAD</code> equals the recorded hash and reports <code>up to date</code>.</p></div></div><div class="lens" data-lens="lifecycle"><h3 class="lens-label">Lifecycle</h3><div class="lens-body"><ol class="steps"><li><code>install</code> finds my directory and clones nothing.</li><li><code>build</code> finds that <code>HEAD</code> matches <code>.git/sarcina-build</code> and is skipped.</li><li><code>load_trigger</code> arms the stubs again.</li><li>I stay off the runtimepath until someone uses <code>:Demo</code> or <code>&lt;leader&gt;d</code>.</li></ol></div></div><div class="lens" data-lens="log"><h3 class="lens-label">Log</h3><div class="lens-body"><figure class="panel"><div class="panel-title">Sarcina 5/5</div><div class="panel-body"><div class="row done"><span class="g">✔</span> util.nvim – install <span class="note">already installed</span></div><div class="row done"><span class="g">✔</span> util.nvim – rtp</div><div class="row done"><span class="g">✔</span> demo.nvim – install <span class="note">already installed</span></div><div class="row done"><span class="g">✔</span> demo.nvim – build <span class="note">up to date</span></div><div class="row done"><span class="g">✔</span> demo.nvim – load_trigger <span class="note">waiting for :Demo, &lt;leader&gt;d</span></div></div></figure><p>Toasts: none. The run is too fast for the panel to open on its own.</p></div></div></div></section><section class="moment"><div class="when">18:00</div><div class="what"><h2>A bad evening</h2><p class="story">Someone pulls a new commit, and my build breaks.</p><div class="lens" data-lens="code"><h3 class="lens-label">Code</h3><div class="lens-body"><p>The same per-commit wrapper runs, but this time the comparison fails, so the build executes. When a task fails, the runner in <code>tasks.lua</code> marks the rest of that plugin's tasks as skipped.</p></div></div><div class="lens" data-lens="lifecycle"><h3 class="lens-label">Lifecycle</h3><div class="lens-body"><ol class="steps"><li><code>HEAD</code> no longer matches the recorded hash, so the build runs again.</li><li>It fails.</li><li>My remaining task is skipped with the note <code>build failed</code>.</li><li><code>load_trigger</code> never runs, so I arm no stubs. <code>:Demo</code> and <code>&lt;leader&gt;d</code> do not exist this session, and I am not on the runtimepath.</li><li>The run ends with one error toast. The panel opens and stays open.</li></ol></div></div><div class="lens" data-lens="log"><h3 class="lens-label">Log</h3><div class="lens-body"><div class="toast error"><span class="lvl">ERROR</span> [Sarcina] 3 done, 1 failed, 1 skipped</div><figure class="panel"><div class="panel-title">Sarcina 5/5 · 1 failed</div><div class="panel-body"><div class="row done"><span class="g">✔</span> util.nvim – install <span class="note">already installed</span></div><div class="row done"><span class="g">✔</span> util.nvim – rtp</div><div class="row done"><span class="g">✔</span> demo.nvim – install <span class="note">already installed</span></div><div class="row fail"><span class="g">✘</span> demo.nvim – build <span class="note">error: ld: library not found for -ltiktoken</span></div><div class="row skip"><span class="g">⊘</span> demo.nvim – load_trigger <span class="note">build failed</span></div></div></figure><p>On the next launch the build ran again and failed with the same panel. The record still held <code>d4b8d94…</code> while <code>HEAD</code> was <code>5495c54…</code>, so a failed build is retried until it succeeds.</p></div></div></div></section>
+  </main>
+  <aside class="note-box">
+    <h2>What running it showed</h2>
+    <p>A failed build takes the whole plugin out of the session. <code>build</code> comes before <code>load_trigger</code> in my task list, so when it fails I arm no stubs, and the key and the command vanish instead of printing an error when used. That follows from the rule that a failure skips the rest of a plugin's tasks. Arming the stubs first and reporting the failure on first use would be a small change to the task order.</p>
+  </aside>
+</div>
+<script>
+(function () {
+  var buttons = Array.prototype.slice.call(document.querySelectorAll('[data-filter]'));
+  buttons.forEach(function (button) {
+    button.addEventListener('click', function () {
+      var wanted = button.getAttribute('data-filter');
+      document.querySelectorAll('.lens').forEach(function (lens) {
+        lens.hidden = wanted !== 'all' && lens.getAttribute('data-lens') !== wanted;
+      });
+      buttons.forEach(function (other) {
+        other.setAttribute('aria-pressed', String(other === button));
+      });
+    });
+  });
+})();
+</script>
