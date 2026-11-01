@@ -41,6 +41,63 @@ test('rejects an unknown dependency', function()
     h.ok(h.notified('unknown dependency ghost'))
 end)
 
+test('an inline dependency spec joins the manifest ahead of its dependent', function()
+    local resolved = resolver.resolve({
+        { name = 'app', repo = 'x/app', deps = { { 'nvim-lua/plenary.nvim' } } },
+    })
+    h.eq(h.names(resolved), { 'plenary.nvim', 'app' })
+    h.eq(resolved[1].spec.repo, 'nvim-lua/plenary.nvim')
+    h.eq(resolved[2].spec.deps, { 'plenary.nvim' })
+    h.eq(h.ids(resolved[1].spec.tasks), { 'install', 'rtp' })
+end)
+
+test('an inline dependency brings its own dependencies', function()
+    local resolved = resolver.resolve({
+        { name = 'app', repo = 'x/app', deps = { { 'a/mid.nvim', deps = { 'b/base.nvim' } } } },
+    })
+    h.eq(h.names(resolved), { 'base.nvim', 'mid.nvim', 'app' })
+end)
+
+test('a dependency given as a repo finds the plugin the manifest already declares', function()
+    local resolved = resolver.resolve({
+        { name = 'app', repo = 'x/app', dependencies = { 'o/lib.nvim' } },
+        { name = 'lib', repo = 'o/lib.nvim' },
+    })
+    h.eq(h.names(resolved), { 'lib', 'app' })
+    h.eq(resolved[2].spec.deps, { 'lib' })
+    h.eq(resolved[2].spec.dependencies, nil)
+end)
+
+test('a dependency given as a repo is installed when the manifest lacks it', function()
+    local resolved = resolver.resolve({ { name = 'app', repo = 'x/app', deps = { 'o/lib.nvim' } } })
+    h.eq(h.names(resolved), { 'lib.nvim', 'app' })
+end)
+
+test('an inline dependency that the manifest already declares is not a duplicate', function()
+    local resolved = resolver.resolve({
+        { name = 'lib', repo = 'x/lib' },
+        { name = 'app', repo = 'x/app', deps = { { 'x/lib' } } },
+    })
+    h.eq(h.names(resolved), { 'lib', 'app' })
+    h.eq(h.notified('Duplicate'), false)
+end)
+
+test('rejects a dependency that is neither a name, a repo nor a spec', function()
+    local resolved = resolver.resolve({ { name = 'app', repo = 'x/app', deps = { 42 } } })
+    h.eq(resolved, {})
+    h.ok(h.notified('invalid dependency'))
+end)
+
+test('a duplicate plugin name keeps the first spec and warns', function()
+    local resolved = resolver.resolve({
+        { name = 'a', repo = 'x/first' },
+        { name = 'a', repo = 'x/second' },
+    })
+    h.eq(#resolved, 1)
+    h.eq(resolved[1].spec.repo, 'x/first')
+    h.ok(h.notified('Duplicate plugin name: a'))
+end)
+
 test('sets spec.triggers from event, ft, cmd and keys', function()
     local resolved = resolver.resolve({ { name = 'a', repo = 'x/a', event = 'BufRead', cmd = 'Foo' } })
     h.eq(resolved[1].spec.triggers, { event = { 'BufRead' }, cmd = { 'Foo' } })

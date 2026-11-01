@@ -28,25 +28,34 @@ local function is_list(t)
     return true
 end
 
---- Recursively collect all *.lua files from the given directories.
+-- Every *.lua file under the directories, once each: the default dir may also be passed as an extra.
+local function spec_files(dirs)
+    local files, seen = {}, {}
+    for _, dir in ipairs(dirs) do
+        for _, file in ipairs(vim.fn.globpath(dir, '**/*.lua', true, true)) do -- absolute paths
+            local real = vim.uv.fs_realpath(file) or file
+            if not seen[real] then
+                seen[real] = true
+                table.insert(files, file)
+            end
+        end
+    end
+    return files
+end
+
+--- Recursively collect the specs from all *.lua files in the given directories.
 local function collect_specs_from_dirs(dirs)
     local specs = {}
-    for _, dir in ipairs(dirs) do
-        local files = vim.fn.globpath(dir, '**/*.lua', true, true) -- absolute paths
-        for _, file in ipairs(files) do
-            local ok, data = pcall(dofile, file)
-            if ok and data then
-                if is_list(data) then
-                    vim.list_extend(specs, data)
-                else
-                    table.insert(specs, data)
-                end
+    for _, file in ipairs(spec_files(dirs)) do
+        local ok, data = pcall(dofile, file)
+        if ok and data then
+            if is_list(data) then
+                vim.list_extend(specs, data)
             else
-                ui.emit(
-                    'error',
-                    string.format('Failed to load spec file %s: %s', file, data or 'unknown error')
-                )
+                table.insert(specs, data)
             end
+        else
+            ui.emit('error', string.format('Failed to load spec file %s: %s', file, data or 'unknown error'))
         end
     end
     return specs
@@ -79,17 +88,21 @@ local function resolve_spec_dirs(spec_paths)
     return norm
 end
 
+--- Map the shorthand first entry of a spec (`{ 'owner/repo', ... }`) to `repo`.
+function M.expand_shorthand(spec)
+    if not spec.repo and type(spec[1]) == 'string' then
+        spec.repo = spec[1]
+        spec[1] = nil
+    end
+end
+
 --- Load all specs and normalise the optional shorthand `repo`.
 function M.load(opts)
     opts = opts or {}
     local dirs = resolve_spec_dirs(opts.spec_paths)
     local specs = collect_specs_from_dirs(dirs)
-    -- Map shorthand first‑array entry to `repo` if needed
     for _, spec in ipairs(specs) do
-        if not spec.repo and type(spec[1]) == 'string' then
-            spec.repo = spec[1]
-            spec[1] = nil
-        end
+        M.expand_shorthand(spec)
     end
     if #specs == 0 then
         ui.emit(
