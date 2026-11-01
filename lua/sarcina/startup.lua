@@ -7,6 +7,7 @@
 
 local load = require('sarcina.load')
 local paths = require('sarcina.paths')
+local stats = require('sarcina.stats')
 local tasks = require('sarcina.tasks')
 local ui = require('sarcina.ui')
 
@@ -38,6 +39,12 @@ local function split(entry, loaded)
     return inline, remaining, now_loads
 end
 
+-- Tells whatever waits for the startup run, such as a dashboard that shows the stats: `User SarcinaReady`, with
+-- the final stats in `data`. A reading taken at UIEnter is early, because the `later` plugins load after it.
+local function announce_ready()
+    vim.api.nvim_exec_autocmds('User', { pattern = 'SarcinaReady', modeline = false, data = stats.get() })
+end
+
 --- Run the `now` phase and queue the rest. The queued run starts once the UI is up.
 function M.start(resolved)
     tasks.begin()
@@ -58,9 +65,8 @@ function M.start(resolved)
         if #rest > 0 then tasks.enqueue(name, { deps = spec.deps, tasks = rest }, { append = true }) end
     end
     ui.emit('debug', string.format('Ran the first tasks of %d installed plugins before the UI', count))
-    load.later(function()
-        if not tasks._started then tasks.run_all(nil, { quiet = true, append = true }) end
-    end)
+    -- run_all starts the run, or, when a trigger or a wait already did, only adds the callback to it.
+    load.later(function() tasks.run_all(announce_ready, { quiet = true, append = true }) end)
 end
 
 return M

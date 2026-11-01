@@ -28,7 +28,6 @@ function M.describe(triggers)
     for _, map in ipairs(triggers.keys or {}) do
         table.insert(parts, keys.parse(map).lhs)
     end
-    if #parts == 0 then return 'a dependent' end -- it loads with the plugins that need it
     return table.concat(parts, ', ')
 end
 

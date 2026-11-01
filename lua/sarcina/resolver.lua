@@ -75,21 +75,6 @@ local function timing_of(spec)
     return 'later'
 end
 
--- A plugin that asks for nothing (no `load`, `lazy` or triggers) and that only triggered plugins need has no
--- reason to load before them, so it loads with them. It is a dependency, claimed when a dependent fires.
-local function loads_with_its_dependents(entry, dependents)
-    local spec = entry.spec
-    if entry.timing ~= 'later' or spec.load ~= nil or spec.lazy ~= nil or spec.triggers ~= nil then
-        return false
-    end
-    local needers = dependents[entry.name]
-    if not needers then return false end
-    for _, needer in ipairs(needers) do
-        if needer.timing ~= 'trigger' then return false end
-    end
-    return true
-end
-
 --- Resolve the manifest.
 --- A dependency is a plugin name, an `owner/repo` (or URL) string, or an inline spec table. The last
 --- two join the manifest unless it already has that plugin, and `deps` is rewritten to plain names.
@@ -203,17 +188,8 @@ function M.resolve(manifest)
         entry.timing = timing_of(entry.spec)
         by_name[entry.name] = entry
     end
-    local dependents = {} -- plugin name -> the entries that depend on it
-    for _, entry in ipairs(ordered) do
-        for _, dep in ipairs(type(entry.spec.deps) == 'table' and entry.spec.deps or {}) do
-            dependents[dep] = dependents[dep] or {}
-            table.insert(dependents[dep], entry)
-        end
-    end
-    -- Dependents come after their dependencies, so walking backwards settles a plugin's dependents before it.
     for i = #ordered, 1, -1 do
         local entry = ordered[i]
-        if loads_with_its_dependents(entry, dependents) then entry.timing = 'trigger' end
         local deps = entry.spec.deps
         for _, dep in ipairs(type(deps) == 'table' and deps or {}) do
             local dep_entry = by_name[dep]
@@ -221,13 +197,9 @@ function M.resolve(manifest)
         end
     end
     -- Only a plugin that loads on a trigger keeps its triggers. false, not nil, so generate() keeps it eager.
-    -- A dependency that loads with its dependents has none of its own, but still waits: `{}` keeps it lazy.
     for _, entry in ipairs(ordered) do
-        local spec = entry.spec
-        if entry.timing ~= 'trigger' and type(spec.triggers) == 'table' then
-            spec.triggers = false
-        elseif entry.timing == 'trigger' and spec.triggers == nil then
-            spec.triggers = {}
+        if entry.timing ~= 'trigger' and type(entry.spec.triggers) == 'table' then
+            entry.spec.triggers = false
         end
     end
     for _, entry in ipairs(ordered) do

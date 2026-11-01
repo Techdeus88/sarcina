@@ -69,6 +69,30 @@ test('a plugin whose load fails, and its dependent, are not loaded', function()
     h.eq({ stats.get().loaded, stats.get().not_loaded }, { 0, 2 })
 end)
 
+test('User SarcinaReady fires once the startup run is done, with the final stats', function()
+    installed('stsrnow.nvim', 'stsrnow')
+    installed('stsrlater.nvim', 'stsrlater')
+    local got, count = nil, 0
+    local group = vim.api.nvim_create_augroup('stats_ready_test', { clear = true })
+    vim.api.nvim_create_autocmd('User', {
+        group = group,
+        pattern = 'SarcinaReady',
+        callback = function(args)
+            got, count = args.data, count + 1
+        end,
+    })
+    begin({
+        { name = 'stsrnow.nvim', repo = 'x/stsrnow', load = 'now', opts = {} },
+        { name = 'stsrlater.nvim', repo = 'x/stsrlater', opts = {} },
+    })
+    h.eq(got, nil)
+    h.ok(vim.wait(2000, function() return got ~= nil end, 5), 'SarcinaReady never fired')
+    vim.wait(100)
+    vim.api.nvim_del_augroup_by_name('stats_ready_test')
+    h.eq({ got.count, got.loaded, got.not_loaded, count }, { 2, 2, 0, 1 })
+    h.eq(type(got.startup_ms), 'number')
+end)
+
 test('startup_ms is absent before the UI is up and a number after', function()
     load._reset(false)
     stats.begin()
@@ -157,6 +181,56 @@ test(
             startup_ms = 'set',
         })
         h.eq(type(numbers.startup_ms), 'number')
+    end
+)
+
+-- A dashboard reads the stats when the UI appears, and again when the startup run says it is done.
+local function run_ready_child()
+    local script = vim.fn.tempname() .. '.lua'
+    vim.fn.writefile({
+        string.format('vim.opt.rtp:prepend(%q)', root),
+        "vim.api.nvim_create_autocmd('User', { pattern = 'SarcinaReady', once = true, callback = function(args)",
+        '    _G.ready = args.data',
+        'end })',
+        "vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()",
+        "    vim.schedule(function() _G.early = require('sarcina').stats() end)",
+        'end })',
+        "require('sarcina').setup()",
+        "vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()",
+        '    vim.defer_fn(function()',
+        '        vim.wait(5000, function() return _G.ready ~= nil end)',
+        '        io.stdout:write(vim.json.encode({ ready = _G.ready, early = _G.early }))',
+        '        vim.cmd.qa({ bang = true })',
+        '    end, 100)',
+        'end })',
+    }, script)
+    local res = vim.system({ vim.v.progpath, '--headless', '-i', 'NONE', '-u', script }, { text = true })
+        :wait(15000)
+    h.eq(res.code, 0, res.stderr)
+    return vim.json.decode(res.stdout)
+end
+
+test(
+    'in a real startup a reading at the first moment is early, and SarcinaReady brings the final one',
+    function()
+        for _, name in ipairs({ 'srnow.nvim', 'srlater.nvim', 'srtrig.nvim' }) do
+            vim.fn.mkdir(paths.install(name), 'p')
+        end
+        local specs = vim.fn.stdpath('config') .. '/lua/plugins'
+        vim.fn.mkdir(specs, 'p')
+        local file = specs .. '/stats_child.lua'
+        vim.fn.writefile({
+            'return {',
+            "    { name = 'srnow.nvim', repo = 'x/srnow', load = 'now', config = function() end },",
+            "    { name = 'srlater.nvim', repo = 'x/srlater', config = function() end },",
+            "    { name = 'srtrig.nvim', repo = 'x/srtrig', cmd = 'StatsReadyCmd', config = function() end },",
+            '}',
+        }, file)
+        local seen = run_ready_child()
+        vim.fn.delete(file)
+        h.eq({ seen.ready.count, seen.ready.loaded, seen.ready.not_loaded }, { 3, 2, 1 })
+        h.eq(type(seen.ready.startup_ms), 'number')
+        h.ok(seen.early.loaded < seen.ready.loaded, 'the early reading already saw the later plugins')
     end
 )
 

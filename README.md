@@ -114,14 +114,14 @@ The four trigger loaders run the callback once, when they fire, and then repeat 
 
 | Loader | Fires on | Repeats |
 | --- | --- | --- |
-| `event:<Event> [pattern]` | the autocmd | the autocmds the callback added, and only those |
-| `ft:<filetype>` | `FileType` | the same |
+| `event:<Event[,Event]> [pattern]` | the first of the events, which may be several, comma separated | the autocmds the callback added, and only those |
+| `ft:<filetype[,filetype]>` | `FileType` | the same, and the `ftplugin`, `indent` and syntax files the callback brought are applied to the buffers of that filetype, plus `filetype detect` when it added `ftdetect` scripts |
 | `cmd:<Command>` | the command | the command, with its args, bang, range and modifiers |
 | `keys:[modes ]<lhs>` | the mapping, in normal mode unless modes come first | the key, fed again |
 
-The loaders are named like the spec fields. The stub is removed before the callback runs, so the callback can define the real command or mapping. If the callback fails, the error is reported and nothing is repeated.
+The loaders are named like the spec fields. The stub is removed before the callback runs, so the callback can define the real command or mapping, and an event loader is nested, so the events the callback causes run their handlers. If the callback fails, the error is reported and nothing is repeated.
 
-`later` callbacks run in the order received, one per tick, after `UIEnter`. Errors raised before the UI is up are held and shown after it.
+`later` callbacks run in the order received, after `UIEnter`, one per 1 ms timer tick, so the editor handles input and redraws between them. This is how MiniMisc and MiniDeps pace it. Errors are reported with the place the callback was queued from. Errors raised before the UI is up are held and shown after it.
 
 ## Triggers
 
@@ -153,6 +153,16 @@ require('sarcina').stats()
 | `startup_ms` | milliseconds from the start of `setup()` to `UIEnter` (`VimEnter` when no UI attaches). Absent until then. It leaves out Neovim's own startup and your config before `setup()`; `nvim --startuptime` covers that |
 
 A plugin whose `load` fails after its `rtp`, or whose queued build fails, counts as not loaded. A plugin with explicit `tasks` counts as loaded only if one of them has `type = 'rtp'`.
+
+The `later` plugins load right after `UIEnter`, so a reading taken at `UIEnter` is early and shows them as not loaded. For final numbers, such as a dashboard row, read the stats when the startup run is done: sarcina fires `User SarcinaReady` once then, with the final stats in `args.data`.
+
+```lua
+vim.api.nvim_create_autocmd('User', {
+    pattern = 'SarcinaReady',
+    once = true,
+    callback = function(args) print(vim.inspect(args.data)) end,
+})
+```
 
 To look at every tracked time, run `:lua vim.print(require('sarcina.stats').tasks())`.
 

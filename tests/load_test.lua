@@ -18,14 +18,51 @@ test('now reports an error with its traceback and goes on', function()
     h.eq(load.now(h.noop), true)
 end)
 
-test('later waits, and runs in the order received, one callback per tick', function()
+test('later waits, and runs in the order received', function()
     local log = {}
     load.later(function() table.insert(log, 'a') end)
     load.later(function() table.insert(log, 'b') end)
     vim.schedule(function() table.insert(log, 'tick') end)
     h.eq(log, {})
     settle()
-    h.eq(log, { 'a', 'tick', 'b' })
+    h.eq(log, { 'tick', 'a', 'b' })
+end)
+
+test('later gives the editor a turn between callbacks', function()
+    local ticks, seen, done = 0, {}, 0
+    local timer = vim.uv.new_timer()
+    timer:start(0, 1, function() ticks = ticks + 1 end)
+    for _ = 1, 6 do
+        load.later(function()
+            table.insert(seen, ticks)
+            local start = vim.uv.hrtime()
+            while (vim.uv.hrtime() - start) / 1e6 < 3 do
+            end
+            done = done + 1
+        end)
+    end
+    settle()
+    timer:stop()
+    timer:close()
+    h.eq(done, 6)
+    h.ok(seen[#seen] - seen[1] >= 3, 'the loop never ran between the callbacks: ' .. table.concat(seen, ' '))
+end)
+
+test('callbacks queued before a reset never run', function()
+    local log = {}
+    load.later(function() table.insert(log, 'old') end)
+    load._reset()
+    load.later(function() table.insert(log, 'new') end)
+    settle()
+    h.eq(log, { 'new' })
+end)
+
+test('a later callback that fails names the place it was queued from', function()
+    load.later(function() error('boom later') end)
+    settle()
+    h.ok(h.notified('boom later'))
+    h.ok(h.notified('Queued from:'))
+    h.ok(h.notified('load_test.lua'))
 end)
 
 test('a failing later callback does not stop the ones after it', function()
@@ -82,6 +119,61 @@ test('a filetype runs the callback once', function()
     vim.bo.filetype = 'sarcinaft'
     vim.cmd('bwipeout!')
     h.eq(count, 1)
+end)
+
+test('an event loader takes several events and runs once, whichever comes first', function()
+    local count = 0
+    load.safely('event:BufNew,BufAdd', function() count = count + 1 end)
+    vim.cmd('enew!')
+    vim.cmd('bwipeout!')
+    vim.cmd('enew!')
+    vim.cmd('bwipeout!')
+    h.eq(count, 1)
+end)
+
+test('an event loader lets the events its callback causes run their handlers', function()
+    local hits = 0
+    local group = vim.api.nvim_create_augroup('load_nested_test', { clear = true })
+    vim.api.nvim_create_autocmd('User', {
+        group = group,
+        pattern = 'LoadInner',
+        callback = function() hits = hits + 1 end,
+    })
+    load.safely('event:User LoadOuter', function() vim.cmd('doautocmd User LoadInner') end)
+    vim.cmd('doautocmd User LoadOuter')
+    vim.api.nvim_del_augroup_by_name('load_nested_test')
+    h.eq(hits, 1)
+end)
+
+test('an ft loader takes several filetypes and runs once', function()
+    local count = 0
+    load.safely('ft:loadone,loadtwo', function() count = count + 1 end)
+    vim.cmd('new')
+    vim.bo.filetype = 'loadtwo'
+    vim.bo.filetype = 'loadone'
+    vim.cmd('bwipeout!')
+    h.eq(count, 1)
+end)
+
+test('an ft loader applies the ftplugin its callback brought to the buffer that woke it', function()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir .. '/ftplugin', 'p')
+    vim.fn.writefile({ 'vim.b.ftplugin_ran = true' }, dir .. '/ftplugin/loadrefresh.lua')
+    local detection = vim.fn.execute('filetype')
+    vim.cmd('filetype plugin on')
+    load.safely('ft:loadrefresh', function() vim.opt.rtp:append(dir) end)
+    vim.cmd('new')
+    vim.bo.filetype = 'loadrefresh'
+    local ran = vim.b.ftplugin_ran
+    vim.cmd('bwipeout!')
+    vim.opt.rtp:remove(dir)
+    if not detection:find('plugin:ON', 1, true) then vim.cmd('filetype plugin off') end
+    h.eq(ran, true)
+end)
+
+test('a loader that cannot be set up reports it instead of raising', function()
+    load.safely('event:NotAnEventAtAll', h.noop)
+    h.ok(h.notified('Could not set up event:NotAnEventAtAll'))
 end)
 
 test('only event, ft, keys and cmd are loaders', function()
