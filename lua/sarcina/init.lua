@@ -6,11 +6,16 @@ local M = {}
 local ui = require('sarcina.ui')
 local manifest = require('sarcina.manifest')
 local resolver = require('sarcina.resolver')
-local installer = require('sarcina.installer')
+local load = require('sarcina.load')
+local startup = require('sarcina.startup')
+
+--- Run `f` safely, now, after the UI is up, or when an event or filetype fires. See sarcina.load.
+M.safely, M.now, M.later, M.now_if_args = load.safely, load.now, load.later, load.now_if_args
 
 --- User‑facing entry point.
 --- Call `require('sarcina').setup()` after adding Sarcina to your runtimepath.
---- Tasks run in the background; `require('sarcina.tasks').wait()` blocks until they finish.
+--- Installed `now` plugins load before it returns; the rest runs in the background once the UI is up,
+--- and `require('sarcina.tasks').wait()` blocks until it is done.
 function M.setup(opts)
     opts = opts or {}
     ui.init()
@@ -21,9 +26,9 @@ function M.setup(opts)
     -- 2️⃣ Resolve dependencies and order plugins
     local resolved = resolver.resolve(specs)
 
-    -- 3️⃣ Queue every plugin's tasks and run them in the background. Lazy plugins register their
-    -- triggers and load later; the rest clone, join the runtimepath and run their config.
-    installer.install_all(resolved, nil, { quiet = true })
+    -- 3️⃣ Load the installed `now` plugins at once and queue the rest for after the UI is up. Installs go
+    -- first, then builds, then the `later` plugins and the triggers of the lazy ones.
+    startup.start(resolved)
 end
 
 return M

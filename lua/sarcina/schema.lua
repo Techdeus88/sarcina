@@ -28,6 +28,8 @@ end
 -- A manifest is a *list* (array) of plugin specs.
 ---@type { key: string, type: string|string[] }[]
 local OPTIONAL_FIELDS = {
+    { key = 'load', type = 'string' },
+    { key = 'lazy', type = 'boolean' },
     { key = 'deps', type = 'table' },
     { key = 'dependencies', type = 'table' },
     { key = 'cmd', type = { 'table', 'string' } },

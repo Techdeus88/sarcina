@@ -32,6 +32,11 @@ local function reset()
     M._fresh = true
 end
 
+--- Start a new job list, unless a run is still going. Enqueue and run_inline with `append` after it.
+function M.begin()
+    if not M.has_active() then reset() end
+end
+
 function M.has_active()
     for _, job in ipairs(M._jobs) do
         if job.status == 'pending' or job.status == 'running' then return true end
@@ -61,32 +66,105 @@ local function condition_ok(task)
     return ok and res and true or false
 end
 
+local function plugin_record(name, plugin_spec)
+    local plugin = M._plugins[name]
+    if not plugin then
+        plugin = { name = name, deps = {}, jobs = {}, next = 1 }
+        M._plugins[name] = plugin
+        table.insert(M._order, name)
+    end
+    local deps = plugin_spec.deps or plugin_spec.dependencies
+    if type(deps) == 'table' and #deps > 0 then plugin.deps = deps end
+    return plugin
+end
+
+local function new_job(plugin_name, task)
+    return {
+        plugin = plugin_name,
+        id = task.id,
+        type = task.type,
+        spec = task,
+        status = 'pending',
+        attempts = 0,
+    }
+end
+
 --- Enqueue all tasks for a given plugin spec (if conditions pass).
 --- A new run replaces the job list. `opts.append` adds to it instead, so earlier results stay visible.
+--- Tasks added to a plugin that already failed are skipped.
 function M.enqueue(plugin_name, plugin_spec, opts)
     if not (opts and opts.append) and not M.has_active() then reset() end
-    local plugin = M._plugins[plugin_name]
-    if not plugin then
-        local deps = plugin_spec.deps or plugin_spec.dependencies
-        plugin = { name = plugin_name, deps = type(deps) == 'table' and deps or {}, jobs = {}, next = 1 }
-        M._plugins[plugin_name] = plugin
-        table.insert(M._order, plugin_name)
-    end
+    local plugin = plugin_record(plugin_name, plugin_spec)
     for _, task in ipairs(plugin_spec.tasks or {}) do
         if condition_ok(task) then
-            local job = {
-                plugin = plugin_name,
-                id = task.id,
-                type = task.type,
-                spec = task,
-                status = 'pending',
-                attempts = 0,
-            }
+            local job = new_job(plugin_name, task)
+            if plugin.failed then
+                job.status = 'skipped'
+                job.note = 'an earlier task failed'
+            end
             table.insert(plugin.jobs, job)
+            table.insert(M._jobs, job)
+            if plugin.failed then plugin.next = #plugin.jobs + 1 end
+            emit(job)
+        end
+    end
+end
+
+-- Runs one job to the end before returning. An executor that answers later is waited for.
+local function run_now(job)
+    job.attempts = 1
+    job.status = 'running'
+    job.started = uv.hrtime()
+    emit(job)
+    local result
+    local function done(ok, msg) result = result or { ok = ok, msg = msg } end
+    local exec = executors[job.type]
+    if not exec then
+        done(false, 'unknown task type ' .. tostring(job.type))
+    else
+        local ok, err = pcall(exec, job, done, function() end)
+        if not ok then done(false, err) end
+        if not result then vim.wait(60000, function() return result ~= nil end, 1) end
+        if not result then done(false, 'timed out') end
+    end
+    job.duration = (uv.hrtime() - job.started) / 1e6
+    if result.ok then
+        job.status = 'done'
+        job.note = type(result.msg) == 'string' and result.msg or nil
+    else
+        job.status = 'failed'
+        job.error = tostring(result.msg or 'unknown error')
+    end
+    emit(job)
+    return result.ok
+end
+
+--- Run a plugin's tasks right now, in order, without returning to the event loop. The jobs are recorded
+--- like any others but never queued, so the runner does not run them again. A failure skips the rest
+--- and marks the plugin failed. Returns true when every task succeeded.
+function M.run_inline(plugin_name, plugin_spec)
+    local plugin = plugin_record(plugin_name, plugin_spec)
+    local jobs = {}
+    for _, task in ipairs(plugin_spec.tasks or {}) do
+        if condition_ok(task) then
+            local job = new_job(plugin_name, task)
+            table.insert(jobs, job)
             table.insert(M._jobs, job)
             emit(job)
         end
     end
+    for i, job in ipairs(jobs) do
+        if not run_now(job) then
+            for j = i + 1, #jobs do
+                jobs[j].status = 'skipped'
+                jobs[j].note = job.id .. ' failed'
+                emit(jobs[j])
+            end
+            plugin.failed = true
+            return false
+        end
+    end
+    return true
 end
 
 local function skip_rest(plugin, reason)
@@ -265,6 +343,8 @@ end
 
 --- Block (while still pumping the event loop) until the queue drains. Returns false on timeout.
 function M.wait(timeout)
+    -- A run that is queued but waits for the UI starts now, since this call blocks until it is done.
+    if not M._started and M.has_active() then M.run_all(nil, { append = true, quiet = true }) end
     return vim.wait(timeout or 60000, function() return not M._started and not M.has_active() end, 5)
 end
 

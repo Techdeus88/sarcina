@@ -52,6 +52,29 @@ local function name_of(plug)
     return inferred
 end
 
+-- Earlier is stronger: `now` before `later` before a trigger.
+local RANK = { now = 1, later = 2, trigger = 3 }
+
+local LOAD_TIMES = { now = true, now_if_args = true, later = true }
+
+-- `load` says when a plugin without triggers loads; `lazy = false` is `load = 'now'`. A plugin with
+-- triggers loads when one fires, unless it asks for `now`.
+local function timing_of(spec)
+    local load = spec.load
+    if load == nil and spec.lazy == false then load = 'now' end
+    if load ~= nil and not LOAD_TIMES[load] then
+        ui.emit(
+            'warning',
+            string.format('Unknown load time %s for %s, using later', tostring(load), spec.name)
+        )
+        load = nil
+    end
+    if load == 'now_if_args' then load = vim.fn.argc(-1) > 0 and 'now' or 'later' end
+    if load == 'now' then return 'now' end
+    if type(spec.triggers) == 'table' then return 'trigger' end
+    return 'later'
+end
+
 --- Resolve the manifest.
 --- A dependency is a plugin name, an `owner/repo` (or URL) string, or an inline spec table. The last
 --- two join the manifest unless it already has that plugin, and `deps` is rewritten to plain names.
@@ -158,19 +181,31 @@ function M.resolve(manifest)
     for _, entry in ipairs(ordered) do
         if entry.spec.triggers == nil then entry.spec.triggers = task_factory.triggers(entry.spec) end
     end
-    -- An eager plugin needs its dependencies loaded up front, so they cannot wait on triggers.
+    -- When each plugin loads. A dependency has to be loaded no later than the plugins that need it, so
+    -- it takes the earliest timing among its dependents.
+    local by_name = {}
+    for _, entry in ipairs(ordered) do
+        entry.timing = timing_of(entry.spec)
+        by_name[entry.name] = entry
+    end
     for i = #ordered, 1, -1 do
-        local spec = ordered[i].spec
-        local deps = spec.deps or spec.dependencies
-        if not spec.triggers and type(deps) == 'table' then
-            for _, dep in ipairs(deps) do
-                name_to_spec[dep].triggers = false -- false, not nil, so generate() keeps it eager
-            end
+        local entry = ordered[i]
+        local deps = entry.spec.deps
+        for _, dep in ipairs(type(deps) == 'table' and deps or {}) do
+            local dep_entry = by_name[dep]
+            if RANK[entry.timing] < RANK[dep_entry.timing] then dep_entry.timing = entry.timing end
+        end
+    end
+    -- Only a plugin that loads on a trigger keeps its triggers. false, not nil, so generate() keeps it eager.
+    for _, entry in ipairs(ordered) do
+        if entry.timing ~= 'trigger' and type(entry.spec.triggers) == 'table' then
+            entry.spec.triggers = false
         end
     end
     for _, entry in ipairs(ordered) do
         local spec = entry.spec
-        if not spec.tasks then spec.tasks = task_factory.generate(spec) end
+        entry.generated = spec.tasks == nil
+        if entry.generated then spec.tasks = task_factory.generate(spec) end
     end
 
     return ordered

@@ -98,6 +98,80 @@ test('a duplicate plugin name keeps the first spec and warns', function()
     h.ok(h.notified('Duplicate plugin name: a'))
 end)
 
+local function timings(resolved)
+    local out = {}
+    for _, entry in ipairs(resolved) do
+        out[entry.name] = entry.timing
+    end
+    return out
+end
+
+test('a plugin loads later by default, on a trigger when it has one', function()
+    local resolved = resolver.resolve({
+        { name = 'plain', repo = 'x/plain' },
+        { name = 'trig', repo = 'x/trig', cmd = 'Trig' },
+    })
+    h.eq(timings(resolved), { plain = 'later', trig = 'trigger' })
+end)
+
+test('load = now loads now, and lazy = false means the same', function()
+    local resolved = resolver.resolve({
+        { name = 'a', repo = 'x/a', load = 'now' },
+        { name = 'b', repo = 'x/b', lazy = false },
+        { name = 'c', repo = 'x/c', load = 'later' },
+    })
+    h.eq(timings(resolved), { a = 'now', b = 'now', c = 'later' })
+end)
+
+test('load = now beats triggers, and the plugin loses them', function()
+    local resolved = resolver.resolve({ { name = 'a', repo = 'x/a', load = 'now', cmd = 'A' } })
+    h.eq(resolved[1].timing, 'now')
+    h.eq(resolved[1].spec.triggers, false)
+    h.eq(h.ids(resolved[1].spec.tasks), { 'install', 'rtp' })
+end)
+
+test('now_if_args is now with file arguments and later without', function()
+    local argc = vim.fn.argc
+    local function timing()
+        return resolver.resolve({ { name = 'a', repo = 'x/a', load = 'now_if_args' } })[1].timing
+    end
+    vim.fn.argc = function() return 1 end
+    local with_args = timing()
+    vim.fn.argc = function() return 0 end
+    local without_args = timing()
+    vim.fn.argc = argc
+    h.eq({ with_args, without_args }, { 'now', 'later' })
+end)
+
+test('a dependency takes the earliest timing among its dependents', function()
+    local resolved = resolver.resolve({
+        { name = 'app', repo = 'x/app', load = 'now', deps = { 'lib' } },
+        { name = 'lib', repo = 'x/lib', cmd = 'Lib', deps = { 'base' } },
+        { name = 'base', repo = 'x/base', event = 'BufRead' },
+        { name = 'page', repo = 'x/page', deps = { 'tool' } },
+        { name = 'tool', repo = 'x/tool', ft = 'lua' },
+        { name = 'lone', repo = 'x/lone', cmd = 'Lone' },
+    })
+    h.eq(
+        timings(resolved),
+        { app = 'now', lib = 'now', base = 'now', page = 'later', tool = 'later', lone = 'trigger' }
+    )
+end)
+
+test('an unknown load time warns and falls back to later', function()
+    local resolved = resolver.resolve({ { name = 'a', repo = 'x/a', load = 'soon' } })
+    h.eq(resolved[1].timing, 'later')
+    h.ok(h.notified('Unknown load time soon'))
+end)
+
+test('entries remember whether their tasks were generated', function()
+    local resolved = resolver.resolve({
+        { name = 'gen', repo = 'x/gen' },
+        { name = 'own', tasks = { h.lua('x', h.noop) } },
+    })
+    h.eq({ resolved[1].generated, resolved[2].generated }, { true, false })
+end)
+
 test('sets spec.triggers from event, ft, cmd and keys', function()
     local resolved = resolver.resolve({ { name = 'a', repo = 'x/a', event = 'BufRead', cmd = 'Foo' } })
     h.eq(resolved[1].spec.triggers, { event = { 'BufRead' }, cmd = { 'Foo' } })

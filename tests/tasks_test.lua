@@ -270,6 +270,65 @@ test('a plugin whose dependency failed to install is skipped after the installs'
     h.eq(h.job('app', 'go').note, 'dependency lib failed')
 end)
 
+test('run_inline runs the tasks before returning and records them as done', function()
+    local log = {}
+    local ok = tasks.run_inline('p', {
+        tasks = {
+            h.lua('a', function() table.insert(log, 'a') end),
+            h.lua('b', function() table.insert(log, 'b') end),
+        },
+    })
+    h.eq(ok, true)
+    h.eq(log, { 'a', 'b' })
+    h.eq({ h.job('p', 'a').status, h.job('p', 'b').status }, { 'done', 'done' })
+    h.eq(tasks.has_active(), false)
+end)
+
+test('run_inline waits for an executor that answers later', function()
+    h.eq(tasks.run_inline('p', { tasks = { { id = 'slow', type = 't_sleep' } } }), true)
+    h.eq(h.job('p', 'slow').status, 'done')
+end)
+
+test('a failing inline task skips the rest, fails the plugin and skips what is queued later', function()
+    local ran = false
+    local ok = tasks.run_inline('p', {
+        tasks = {
+            h.lua('bad', function() error('inline broke') end),
+            h.lua('next', function() ran = true end),
+        },
+    })
+    h.eq(ok, false)
+    h.eq(ran, false)
+    h.ok(h.job('p', 'bad').error:find('inline broke', 1, true))
+    h.eq(h.job('p', 'next').status, 'skipped')
+    h.eq(tasks.plugin_failed('p'), true)
+    tasks.enqueue('p', { tasks = { h.lua('queued', function() ran = true end) } }, { append = true })
+    tasks.run_all(nil, { append = true })
+    h.ok(tasks.wait(2000))
+    h.eq(ran, false)
+    h.eq(h.job('p', 'queued').status, 'skipped')
+end)
+
+test('a plugin that ran inline counts as finished for its dependents', function()
+    local log = {}
+    tasks.run_inline('lib', { tasks = { h.lua('x', function() table.insert(log, 'lib') end) } })
+    tasks.enqueue(
+        'app',
+        { deps = { 'lib' }, tasks = { h.lua('y', function() table.insert(log, 'app') end) } },
+        { append = true }
+    )
+    tasks.run_all(nil, { append = true })
+    h.ok(tasks.wait(2000))
+    h.eq(log, { 'lib', 'app' })
+end)
+
+test('wait starts a run that is queued but not started', function()
+    local ran = false
+    tasks.enqueue('p', { tasks = { h.lua('a', function() ran = true end) } })
+    h.ok(tasks.wait(2000))
+    h.eq(ran, true)
+end)
+
 test('runs different plugins in parallel', function()
     local running, peak = 0, 0
     executors.t_par = function(_, done)
