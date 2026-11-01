@@ -65,7 +65,7 @@ local function run_child(steps, argument, build_specs)
         '        io.stdout:write(vim.json.encode({',
         '            ev = g.trg_ev_loaded, ft = g.trg_ft_loaded, cmd = g.trg_cmd_loaded, key = g.trg_key_loaded,',
         '            ev_replayed = g.trg_ev_replayed, ft_replayed = g.trg_ft_replayed,',
-        '            cmd_ran = g.trg_cmd_ran, key_pressed = g.trg_key_pressed,',
+        '            cmd_ran = g.trg_cmd_ran, key_pressed = g.trg_key_pressed, order = _G.trg_order,',
         '        }))',
         '        vim.cmd.qa({ bang = true })',
         '    end, 200)',
@@ -78,6 +78,29 @@ local function run_child(steps, argument, build_specs)
     vim.fn.delete(spec)
     h.eq(res.code, 0, res.stderr)
     return vim.json.decode(res.stdout)
+end
+
+-- Writes a spec file whose configs log their plugin name, in load order, to _G.trg_order.
+local function write_specs(plugins)
+    local specs = vim.fn.stdpath('config') .. '/lua/plugins'
+    vim.fn.mkdir(specs, 'p')
+    local file = specs .. '/trigger_child.lua'
+    local lines = {
+        'local function log(name) return function() _G.trg_order = _G.trg_order or {}; table.insert(_G.trg_order, name) end end',
+        'return {',
+    }
+    vim.list_extend(lines, plugins)
+    table.insert(lines, '}')
+    vim.fn.writefile(lines, file)
+    return file
+end
+
+local function installed(name, plugin_file)
+    local dir = paths.install(name)
+    vim.fn.mkdir(dir .. '/plugin', 'p')
+    if plugin_file then
+        vim.fn.writefile({ plugin_file }, dir .. '/plugin/' .. name:gsub('%.nvim$', '') .. '.lua')
+    end
 end
 
 local function lua_file()
@@ -116,6 +139,43 @@ test('a key trigger loads its plugin and the key reaches its mapping', function(
         "        vim.api.nvim_feedkeys('', 'x', false)",
     })
     h.eq({ seen.key, seen.key_pressed }, { true, 1 })
+end)
+
+test('a triggered plugin loads its now, later and triggered dependencies before itself', function()
+    for _, name in ipairs({ 'trgdnow.nvim', 'trgdlater.nvim', 'trgdtrig.nvim' }) do
+        installed(name)
+    end
+    installed('trgdmain.nvim', "vim.api.nvim_create_user_command('TrgDepCmd', function() end, {})")
+    local seen = run_child(
+        { "        vim.cmd('TrgDepCmd')", '        settle()' },
+        nil,
+        function()
+            return write_specs({
+                "    { name = 'trgdnow.nvim', repo = 'x/trgdnow', load = 'now', config = log('now') },",
+                "    { name = 'trgdlater.nvim', repo = 'x/trgdlater', config = log('later') },",
+                "    { name = 'trgdtrig.nvim', repo = 'x/trgdtrig', event = 'User TrgDepEvent', config = log('triggered') },",
+                "    { name = 'trgdmain.nvim', repo = 'x/trgdmain', cmd = 'TrgDepCmd', config = log('main'),",
+                "        deps = { 'trgdnow.nvim', 'trgdlater.nvim', 'trgdtrig.nvim' } },",
+            })
+        end
+    )
+    h.eq(seen.order, { 'now', 'later', 'triggered', 'main' })
+end)
+
+test('a file argument wakes a filetype trigger only after its later dependency has loaded', function()
+    installed('trgelater.nvim')
+    installed('trgeft.nvim')
+    local seen = run_child(
+        {},
+        lua_file(),
+        function()
+            return write_specs({
+                "    { name = 'trgelater.nvim', repo = 'x/trgelater', config = log('later') },",
+                "    { name = 'trgeft.nvim', repo = 'x/trgeft', ft = 'lua', config = log('ft'), deps = { 'trgelater.nvim' } },",
+            })
+        end
+    )
+    h.eq(seen.order, { 'later', 'ft' })
 end)
 
 if vim.fn.executable('git') == 1 then
@@ -170,6 +230,30 @@ if vim.fn.executable('git') == 1 then
             return file
         end)
         h.eq({ seen.ev, seen.ft, seen.ev_replayed, seen.ft_replayed }, { true, true, true, true })
+    end)
+
+    test('on a very first launch a triggered plugin still loads after its dependencies', function()
+        local now = repo('trgfnow', '-- now')
+        local dep = repo('trgfdep', '-- dep')
+        local main = repo('trgfft', '-- ft')
+        local seen = run_child(
+            {},
+            lua_file(),
+            function()
+                return write_specs({
+                    string.format(
+                        "    { name = 'trgfnow.nvim', repo = %q, load = 'now', config = log('now') },",
+                        now
+                    ),
+                    string.format("    { name = 'trgfdep.nvim', repo = %q, config = log('later') },", dep),
+                    string.format(
+                        "    { name = 'trgfft.nvim', repo = %q, ft = 'lua', config = log('ft'), deps = { 'trgfnow.nvim', 'trgfdep.nvim' } },",
+                        main
+                    ),
+                })
+            end
+        )
+        h.eq(seen.order, { 'now', 'later', 'ft' })
     end)
 end
 
