@@ -91,11 +91,6 @@ test('only event, ft, keys and cmd are loaders', function()
     h.ok(h.notified('Unknown load time: key:<F5>'))
     h.eq(vim.fn.maparg('<F5>', 'n'), '')
 end)
-    vim.cmd('new')
-    vim.bo.filetype = 'sarcinaft2'
-    vim.cmd('bwipeout!')
-    h.eq(count, 1)
-end)
 
 test(
     'an event loader repeats the autocmds its callback added, once, and then stays out of the way',
