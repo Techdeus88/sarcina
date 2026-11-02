@@ -100,6 +100,26 @@ test('a build waits for the UI even for a now plugin', function()
     h.eq(_G.start_log, { 'setup:stbuilt.nvim', 'build' })
 end)
 
+test('a now plugin whose build is stale loads after the build', function()
+    installed('ststale.nvim', 'ststale')
+    local dir = paths.install('ststale.nvim')
+    vim.fn.system({ 'git', '-C', dir, 'init', '-q' })
+    vim.fn.system({ 'git', '-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'add', '-A' })
+    vim.fn.system({ 'git', '-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'i' })
+    begin({
+        {
+            name = 'ststale.nvim',
+            repo = 'x/ststale',
+            load = 'now',
+            opts = {},
+            build = function() log('build') end,
+        },
+    })
+    h.eq(_G.start_log, {})
+    h.ok(tasks.wait(2000))
+    h.eq(_G.start_log, { 'build', 'setup:ststale.nvim' })
+end)
+
 test('a plugin with a trigger runs its init and arms its stub at once, and loads nothing', function()
     installed('sttrig.nvim', 'sttrig')
     begin({

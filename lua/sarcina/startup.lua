@@ -5,6 +5,7 @@
 -- first buffer right after init and an event or filetype trigger armed later would miss it. The rest,
 -- installs and builds included, is queued and runs once the UI is up.
 
+local executors = require('sarcina.executors')
 local load = require('sarcina.load')
 local paths = require('sarcina.paths')
 local stats = require('sarcina.stats')
@@ -25,9 +26,20 @@ local function deps_loaded(spec, loaded)
     return true
 end
 
+local function has_task(spec, id)
+    for _, task in ipairs(spec.tasks) do
+        if task.id == id then return true end
+    end
+    return false
+end
+
 -- Splits a generated task list into what runs at once and what is left for later.
 local function split(entry, loaded)
     local now_loads = entry.timing == 'now' and deps_loaded(entry.spec, loaded)
+    -- The build runs after the UI is up, so a plugin whose build is stale loads behind it, not before.
+    if now_loads and has_task(entry.spec, 'build') and executors.build_stale(entry.name) then
+        now_loads = false
+    end
     local inline, remaining = {}, {}
     for _, task in ipairs(entry.spec.tasks) do
         if task.id == 'before' or task.id == 'load_trigger' or (now_loads and LOADING[task.id]) then

@@ -444,6 +444,14 @@ local function write_record(path, commit)
     file:close()
 end
 
+-- Whether the plugin's build has not run at its current commit, checked at once. A plugin with no readable
+-- HEAD counts as up to date, since a build would have no commit to record either.
+function M.build_stale(name)
+    local res = vim.system({ 'git', '-C', paths.install(name), 'rev-parse', 'HEAD' }, { text = true }):wait()
+    if res.code ~= 0 then return false end
+    return read_record(paths.install(name) .. '/.git/sarcina-build') ~= vim.trim(res.stdout)
+end
+
 -- `needs_plugin` puts the plugin on the runtimepath first, for code that requires its modules. Its plugin/
 -- files wait for the `rtp` task.
 local function per_commit(exec, needs_plugin)

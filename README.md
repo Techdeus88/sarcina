@@ -167,7 +167,7 @@ A spec with `event`, `ft`, `cmd` or `keys` is triggered: it loads when one fires
 
 - A triggered plugin only registers stubs for its triggers. When it is installed they exist as soon as `setup()` returns, so `nvim file.lua` wakes an `event` or `ft` trigger for its first buffer. The `load_trigger` row reads `waiting for :Telescope`.
 - A plugin that is not installed yet registers its stubs once it is cloned, after the first buffer was read. It then catches up and loads at once if a trigger already happened: a loaded buffer whose filetype matches an `ft` trigger, a file buffer whose name matches a `BufRead`, `BufReadPre`, `BufReadPost`, `BufEnter`, `BufWinEnter`, `BufAdd` or `BufNew` trigger, or a `VimEnter` or `UIEnter` that already fired. The plugin's own handlers replay for the first such buffer. Commands, keys and other events, such as `User` ones, can only be started by the user.
-- A plugin that is loading or loaded keeps no stubs, so registering it again, as `:Sarcina install` does, does not re-arm it.
+- A plugin that is loading or loaded keeps no stubs, so registering it again does not re-arm it. `:Sarcina install` does not register it again anyway: it runs only the plugins that have not loaded or armed their trigger in this session.
 - The first trigger to fire removes every stub, then runs the plugin's `rtp`, `load` and `after` tasks through the task runner, so a failed config shows up in the window like any other failure.
 - Triggered dependencies load first. A `now` or `later` plugin pulls its dependencies in at the same time, transitively.
 - Afterwards the trigger replays. A command runs again with its args, bang and range. A key is fed again. An event runs only the autocmds the plugin added, so other plugins' handlers do not fire twice.
@@ -244,8 +244,8 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 | Command | Does |
 | --- | --- |
-| `:Sarcina install` | resolve the manifest and run every plugin's tasks |
-| `:Sarcina sync` | install and load the plugins that are not on disk, and list the directories that are not in your specs |
+| `:Sarcina install` | install and load the plugins that have not loaded in this session. One that has is left alone, so its `config` never runs twice |
+| `:Sarcina sync` | `install`, and list the directories that are not in your specs |
 | `:Sarcina sync!` | the same, and delete those directories |
 | `:Sarcina check [plugins]` | ask each plugin's remote where the plugin should be, and say which are elsewhere. Nothing is changed |
 | `:Sarcina update [plugins]` | move each plugin to where its remote says it should be, rebuild what moved, and write the lock file |
@@ -259,7 +259,9 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 **`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. It downloads nothing, and names the plugins that are somewhere else. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
 
-**`sync`** makes the plugins directory match your specs. A plugin that is not on disk is cloned and then loaded the way its spec says, now, later or on a trigger, so it works without a restart. A plugin that is on disk is left as it is: its `config` does not run again, and it does not move (that is `update`). The directories no spec owns are listed as `clean` lists them, and `sync!` deletes them. With nothing missing and nothing extra it says `Everything is in sync`. Like `clean`, it refuses an empty manifest.
+**`install`** reads your specs from disk and runs the plan of each plugin that has not loaded in this session: one that is not on disk is cloned (`Installing 1: …`), one that is on disk but did not load, such as a spec you just added, is loaded (`Loading 1: …`), and one a failure stopped before it loaded runs again. Each loads the way its spec says, now, later or on a trigger, so it works without a restart. A plugin that loaded, is waiting for its trigger, or is queued is left alone: its `config` does not run twice, and it does not move (that is `update`). A plugin whose `config` failed after it was on the runtimepath counts as loaded; restart Neovim to run it again.
+
+**`sync`** is `install` and `clean` in one: it installs and loads what has not loaded, and lists the directories no spec owns, which `sync!` deletes. With nothing to run and nothing extra it says `Everything is in sync`. Like `clean`, it refuses an empty manifest.
 
 **`clean`** compares the directories in `stdpath('data')/sarcina/plugins` with the plugins of your specs, dependencies included. It refuses when the manifest is empty or does not resolve, so a spec that failed to load cannot make every plugin look removable. `clean!` also takes the plugin off `runtimepath` and out of the install times and the lock file. A plugin whose spec sets `dir` lives elsewhere and is never touched.
 
