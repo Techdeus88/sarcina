@@ -28,7 +28,9 @@ local function win_open() return ui._winid ~= nil and vim.api.nvim_win_is_valid(
 
 local function lines() return vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false) end
 
-local function header_text() return vim.api.nvim_buf_get_lines(ui._header_bufnr, 0, -1, false)[1] end
+local function header_all() return vim.api.nvim_buf_get_lines(ui._header_bufnr, 0, -1, false) end
+
+local function header_text() return header_all()[1] end
 
 local function footer() return vim.api.nvim_buf_get_lines(ui._footer_bufnr, 0, -1, false) end
 
@@ -260,6 +262,53 @@ test(
     end
 )
 
+test('below the total the header shows how far all the tasks have got, centered', function()
+    local plugins = {}
+    for _, name in ipairs({ 'a', 'b', 'c' }) do
+        table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop), h.lua('load', h.noop) } })
+    end
+    h.register(plugins)
+    h.run({ plugins[1], plugins[2] })
+    with_size(200, 50, function()
+        ui.open()
+        local got = header_all()
+        h.eq(#got, 2)
+        h.eq(got[1], ' Total: 3 plugins')
+        h.eq(vim.trim(got[2]), '4/6 tasks')
+        local width = vim.api.nvim_win_get_config(ui._header_winid).width
+        h.eq(#got[2]:match('^ *'), math.floor((width - #'4/6 tasks') / 2))
+        local ns = vim.api.nvim_get_namespaces().sarcina_window
+        local marks = vim.api.nvim_buf_get_extmarks(
+            ui._header_bufnr,
+            ns,
+            { 1, 0 },
+            { 1, -1 },
+            { details = true }
+        )
+        h.eq(
+            vim.tbl_map(function(mark) return mark[4].hl_group end, marks),
+            { 'SarcinaStepTime', 'SarcinaNote' }
+        )
+    end)
+end)
+
+test('the total grows as the tasks of the plugins finish, up to all of them', function()
+    local held = { name = 'a', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
+    local fast = loaded('b')
+    h.register({ held, fast })
+    tasks.enqueue('a', held)
+    tasks.enqueue('b', fast)
+    tasks.run_all()
+    with_size(200, 50, function()
+        h.ok(vim.wait(500, win_open), 'the window never opened')
+        -- b is done (1 of 1) and a is at its first task (1 of 2).
+        h.ok(vim.wait(500, function() return vim.trim(header_all()[2]) == '2/3 tasks' end), header_all()[2])
+        release()
+        h.ok(tasks.wait(2000))
+        h.ok(vim.wait(500, function() return vim.trim(header_all()[2]) == '3/3 tasks' end), header_all()[2])
+    end)
+end)
+
 test('four windows are stacked and centered, 80% by 80% of the editor', function()
     h.register({ loaded('a'), loaded('b'), loaded('c') })
     with_size(120, 40, function()
@@ -267,10 +316,10 @@ test('four windows are stacked and centered, 80% by 80% of the editor', function
         local function config(win) return vim.api.nvim_win_get_config(win) end
         local header, list = config(ui._header_winid), config(ui._winid)
         local detail, bottom = config(ui._detail_winid), config(ui._footer_winid)
-        -- 96 columns and 31 rows: a header of 3 rows, a footer of 3, and 25 for the panes with their borders.
+        -- 96 columns and 31 rows: a header of 4 rows, a footer of 3, and 24 for the panes with their borders.
         h.eq({ header.width + 2, bottom.width + 2, list.width + detail.width + 4 }, { 96, 96, 96 })
-        h.eq({ header.height, bottom.height, list.height, detail.height }, { 1, 1, 23, 23 })
-        h.eq(list.row, header.row + 3)
+        h.eq({ header.height, bottom.height, list.height, detail.height }, { 2, 1, 22, 22 })
+        h.eq(list.row, header.row + 4)
         h.eq(detail.row, list.row)
         h.eq(bottom.row, list.row + list.height + 2)
         h.eq(detail.col, list.col + list.width + 2)
@@ -292,7 +341,7 @@ test('the header and the footer stay in view while the list scrolls', function()
     with_size(100, 40, function()
         ui.open()
         local list = vim.api.nvim_win_get_config(ui._winid)
-        h.eq({ list.width, list.height }, { 78, 23 })
+        h.eq({ list.width, list.height }, { 78, 22 })
         h.eq(#lines(), 60)
         h.ok(lines()[1]:find('…', 1, true), 'a long name was not cut: ' .. lines()[1])
         local before = { header_text(), footer(), vim.api.nvim_win_get_config(ui._header_winid).row }

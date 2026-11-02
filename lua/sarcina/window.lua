@@ -105,8 +105,8 @@ local view = {
     detail = 0, -- columns left for a row's detail text
 }
 
--- The header and the footer are one line each, and two borders.
-local HEADER_OUTER, FOOTER_OUTER = 3, 3
+-- The header is two lines and the footer one, each with two borders.
+local HEADER_OUTER, FOOTER_OUTER = 4, 3
 
 -- The tasks widget of a row is a pill: a light background in the colour of the state, with the text in a
 -- darker shade of the same colour. `from` is the group whose colour it takes, `fallback` is used when the
@@ -246,9 +246,24 @@ local function row_line(row)
     return build_line(parts)
 end
 
-local function header_line()
+-- How many plugins there are, and below it, centered, how far all their tasks have got together: the left
+-- numbers of the rows added up over the right ones, so it grows as the rows do.
+local function header_lines()
     local text = string.format(' Total: %d plugin%s', #names, #names == 1 and '' or 's')
-    return build_line({ { fit(text, view.full_w), 'SarcinaHeader' } })
+    local task, tasks = 0, 0
+    for _, name in ipairs(names) do
+        task, tasks = task + rows[name].task, tasks + rows[name].tasks
+    end
+    local count = string.format('%d/%d tasks', task, tasks)
+    local lead = math.max(math.floor((view.full_w - width_of(count)) / 2), 0)
+    return {
+        build_line({ { fit(text, view.full_w), 'SarcinaHeader' } }),
+        build_line({
+            { string.rep(' ', lead) },
+            { tostring(task), 'SarcinaStepTime' },
+            { string.format('/%d tasks', tasks), 'SarcinaNote' },
+        }),
+    }
 end
 
 -- How many plugins load now, later and on a trigger, on the left, and the startup time on the right.
@@ -331,7 +346,7 @@ end
 
 -- The header and the footer have buffers of their own, so they stay in view while the list scrolls.
 local function put_chrome(bufs)
-    put(bufs.header, NS, 1, vim.api.nvim_buf_line_count(bufs.header), { header_line() })
+    put(bufs.header, NS, 1, vim.api.nvim_buf_line_count(bufs.header), header_lines())
     put(bufs.footer, NS, 1, vim.api.nvim_buf_line_count(bufs.footer), footer_lines())
 end
 
@@ -387,7 +402,7 @@ function M.config()
     local col = math.max(math.floor((vim.o.columns - view.outer_w) / 2), 0)
     local middle_row = row + HEADER_OUTER
     local config = {
-        header = { relative = 'editor', row = row, col = col, width = view.full_w, height = 1 },
+        header = { relative = 'editor', row = row, col = col, width = view.full_w, height = 2 },
         list = { relative = 'editor', row = middle_row, col = col, width = view.list_w, height = view.middle },
         footer = {
             relative = 'editor',

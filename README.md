@@ -250,6 +250,7 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
 ```
 ╭──────────────────────────────────────────────────────────────╮
 │ Total: 55 plugins                                            │
+│                        127/210 tasks                         │
 ╰──────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────╮╭ avante.nvim ──────────────╮
 │ ✔ plenary.nvim later   loaded  3 ││ state     ✘ failed        │
@@ -265,7 +266,7 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
                                     ╰───────────────────────────╯
 ```
 
-**The header** says how many plugins there are: `Total: 55 plugins`. **The footer** says how many load now, later and on a trigger, on the left, and the startup time on the right: `Now 7, Later 18, Triggered 30` and `Startup: 83ms`. Both come from `stats.get()`.
+**The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3 of 8 tasks`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** says how many load now, later and on a trigger, on the left, and the startup time on the right: `Now 7, Later 18, Triggered 30` and `Startup: 83ms`. Both come from `stats.get()`.
 
 **The list** has one row per plugin, in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. So installed `now` plugins come first, since they load before the UI, then the `later` ones as they finish, then triggered ones as they fire.
 
