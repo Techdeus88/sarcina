@@ -79,6 +79,7 @@ function M.configure(opts)
         show = 'auto'
     end
     M.show = show
+    window().rounded = not opts or opts.rounded ~= false
 end
 
 -- Draws the details of the selected plugin and names the details window after it. A different plugin

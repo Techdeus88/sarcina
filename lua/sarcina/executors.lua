@@ -5,6 +5,7 @@
 -- calls `report()` with no line to say so.
 -- The runner in tasks.lua owns every status change, so executors never touch the UI state.
 
+local lock = require('sarcina.lock')
 local paths = require('sarcina.paths')
 
 local uv = vim.uv
@@ -54,6 +55,39 @@ local function source_plugin_files(dir)
     end
 end
 
+-- Runs `git -C dir <args>` and calls `cb(ok, text)` on the main loop: its output, or when it failed the last
+-- line it printed.
+local function git(dir, args, cb)
+    local spawned = pcall(
+        vim.system,
+        vim.list_extend({ 'git', '-C', dir }, args),
+        { text = true },
+        function(res)
+            vim.schedule(function()
+                if res.code == 0 then return cb(true, vim.trim(res.stdout or '')) end
+                local said = last_line(res.stderr or '') or last_line(res.stdout or '')
+                cb(false, said or string.format('git exited with code %d', res.code))
+            end)
+        end
+    )
+    if not spawned then vim.schedule(function() cb(false, 'git is not available') end) end
+end
+
+local function short(commit) return commit:sub(1, 7) end
+
+-- Makes `dir` sit at `commit`: it is fetched when the clone does not have it, then the branch is moved there,
+-- so the branch still tracks its upstream and a later update moves on from it.
+local function pin(dir, commit, cb)
+    git(dir, { 'cat-file', '-e', commit .. '^{commit}' }, function(have)
+        local function reset() git(dir, { 'reset', '--hard', commit }, cb) end
+        if have then return reset() end
+        git(dir, { 'fetch', '--depth', '1', 'origin', commit }, function(fetched, err)
+            if not fetched then return cb(false, err) end
+            reset()
+        end)
+    end)
+end
+
 function M.git_clone(job, done, report)
     local spec = job.spec
     if not spec.repo then return done(false, 'no repo') end
@@ -65,20 +99,70 @@ function M.git_clone(job, done, report)
     vim.fn.mkdir(vim.fn.fnamemodify(staging, ':h'), 'p')
     vim.fn.mkdir(vim.fn.fnamemodify(dest, ':h'), 'p')
     local cmd = { 'git', 'clone', '--depth', '1', '--progress', clone_url(spec.repo), staging }
+    local function fail(err)
+        vim.fn.delete(staging, 'rf')
+        done(false, err)
+    end
+    local function move()
+        local moved, move_err = uv.fs_rename(staging, dest)
+        if not moved then return fail('atomic move failed: ' .. tostring(move_err)) end
+        lock.mark(job.plugin, dest)
+        done(true)
+    end
     run_cmd(cmd, nil, report, function(ok, err)
         vim.schedule(function()
-            if not ok then
-                vim.fn.delete(staging, 'rf')
-                return done(false, err)
-            end
-            local moved, move_err = uv.fs_rename(staging, dest)
-            if not moved then
-                vim.fn.delete(staging, 'rf')
-                return done(false, 'atomic move failed: ' .. tostring(move_err))
-            end
-            done(true)
+            if not ok then return fail(err) end
+            -- The lock file names the commit this plugin was last installed or updated at.
+            local locked = lock.get(job.plugin)
+            if not locked then return move() end
+            git(staging, { 'rev-parse', 'HEAD' }, function(read, head)
+                if read and head == locked then return move() end
+                pin(staging, locked, function(pinned, why)
+                    if not pinned then
+                        return fail(
+                            string.format('locked commit %s is not available: %s', short(locked), why)
+                        )
+                    end
+                    move()
+                end)
+            end)
         end)
     end)
+end
+
+-- `check` or `update` of a plugin: fetches what its remote has, compares that with `HEAD`, and for `update`
+-- (`spec.apply`) moves there. Its note says what happened. A plugin with changes of its own is left as it is.
+function M.git_update(job, done, report)
+    local spec = job.spec
+    local dir = spec.dest or paths.install(job.plugin)
+    if not uv.fs_stat(dir) then return done(true, 'not installed') end
+    job.working = true
+    report()
+    run_cmd(
+        { 'git', '-C', dir, 'fetch', '--depth', '1', '--progress', 'origin' },
+        nil,
+        report,
+        function(fetched, err)
+            vim.schedule(function()
+                if not fetched then return done(false, err) end
+                git(dir, { 'rev-parse', 'HEAD', '@{u}' }, function(read, out)
+                    local head, upstream = out:match('^(%x+)%s+(%x+)')
+                    if not read or not head then return done(false, read and 'no upstream branch' or out) end
+                    if spec.apply then lock.mark(job.plugin, dir) end
+                    if head == upstream then return done(true, 'up to date') end
+                    local change = short(head) .. ' → ' .. short(upstream)
+                    if not spec.apply then return done(true, 'update available ' .. change) end
+                    git(dir, { 'status', '--porcelain', '--untracked-files=no' }, function(_, changes)
+                        if changes ~= '' then return done(true, 'skipped: local changes') end
+                        git(dir, { 'reset', '--hard', '@{u}' }, function(moved, why)
+                            if not moved then return done(false, why) end
+                            done(true, change)
+                        end)
+                    end)
+                end)
+            end)
+        end
+    )
 end
 
 function M.make(job, done, report)

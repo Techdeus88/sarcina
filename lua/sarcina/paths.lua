@@ -8,6 +8,9 @@ function M.plugins_dir() return vim.fn.stdpath('data') .. '/sarcina/plugins/' en
 
 function M.install(name) return M.plugins_dir() .. name end
 
+-- The commit of every installed plugin, kept with your config so it can be committed. See lock.lua.
+function M.lock_file() return vim.fn.stdpath('config') .. '/sarcina-lock.json' end
+
 -- How long each plugin took to install, kept next to the plugins. See installs.lua.
 function M.installs_file() return vim.fn.stdpath('data') .. '/sarcina/installs.json' end
 

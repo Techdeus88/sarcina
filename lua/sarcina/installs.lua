@@ -45,6 +45,26 @@ function M.record(name, ms)
     vim.uv.fs_rename(path .. '.tmp', path)
 end
 
+--- Drop the records of plugins that were removed.
+function M.forget(names)
+    cache = read()
+    local changed = false
+    for _, name in ipairs(names) do
+        if cache[name] ~= nil then
+            cache[name], changed = nil, true
+        end
+    end
+    if not changed then return end
+    local ok, text = pcall(vim.json.encode, cache, { indent = '  ', sort_keys = true })
+    if not ok then text = vim.json.encode(cache) end
+    local path = paths.installs_file()
+    local file = io.open(path .. '.tmp', 'w')
+    if not file then return end
+    file:write(text, '\n')
+    file:close()
+    vim.uv.fs_rename(path .. '.tmp', path)
+end
+
 --- Forget what was read, so the next lookup reads the file again. For tests.
 function M._reset() cache = nil end
 

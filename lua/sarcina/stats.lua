@@ -114,10 +114,10 @@ local function first_line(text)
     return (line:gsub('^%S+%.lua:%d+: ', ''))
 end
 
-local WORKING = { install = 'installing', build = 'building' }
+local WORKING = { install = 'installing', build = 'building', update = 'updating', check = 'checking' }
 
--- install and build count as work only once they really started, since a clone of what is on disk and a
--- build whose commit did not change finish at once.
+-- install, build, update and check count as work only once they really started, since a clone of what is on
+-- disk and a build whose commit did not change finish at once.
 local function is_work(job) return WORKING[job.id] == nil or job.working == true end
 
 -- The state of a plugin and the line that says more, from its latest job of each task id.

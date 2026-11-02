@@ -7,6 +7,7 @@ local M = {}
 local ui = require('sarcina.ui')
 local executors = require('sarcina.executors')
 local installs = require('sarcina.installs')
+local lock = require('sarcina.lock')
 local track = require('sarcina.track')
 
 M.max_concurrent = 4
@@ -230,6 +231,7 @@ local function settle()
     M._started = false
     local summary = summarize()
     if M._quiet then summary.quiet = true end
+    lock.flush()
     ui.emit('done', summary)
     local callbacks = M._callbacks
     M._callbacks = {}
@@ -248,7 +250,7 @@ local function finish(plugin, job, ok, msg, ended)
         job.note = type(msg) == 'string' and msg or nil
         job.error = nil
         -- An install that really cloned is worth remembering: the next session will not run it.
-        if is_install(job) and job.working then installs.record(job.plugin, job.duration) end
+        if job.id == 'install' and job.working then installs.record(job.plugin, job.duration) end
         emit(job)
     else
         job.error = tostring(msg or 'unknown error')

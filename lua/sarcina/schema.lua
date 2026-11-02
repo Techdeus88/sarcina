@@ -123,6 +123,7 @@ end
 -- Additional fields depend on the type.
 local TASK_SPEC = {
     git_clone = { required = { 'repo' } },
+    git_update = { required = {} }, -- `apply` says whether to move to what was fetched
     lua = { required = {} }, -- needs `script` or `fn`, checked below
     cmd = { required = { 'cmd' } },
     shell = { required = { 'cmd' } },
@@ -162,6 +163,9 @@ function M.validate_task(task)
     end
     if task.phase ~= nil and task.phase ~= 'install' then
         return fail(string.format('Task %s: `phase` must be "install".', task.id))
+    end
+    if task.apply ~= nil and type(task.apply) ~= 'boolean' then
+        return fail(string.format('Task %s: `apply` must be a boolean.', task.id))
     end
     if task.per_commit ~= nil and type(task.per_commit) ~= 'boolean' then
         return fail(string.format('Task %s: `per_commit` must be a boolean.', task.id))

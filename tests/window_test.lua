@@ -85,9 +85,9 @@ test('there is one row per plugin in load order, with its state and its task cou
         for i = 1, 6 do
             h.ok(got[i]:find('plugin' .. i, 1, true), 'row ' .. i .. ' is ' .. got[i])
         end
-        h.ok(got[1]:find('✔ plugin1%s+later%s+loaded%s+2 of 2 tasks'), got[1])
-        h.ok(got[1]:find('2 of 2 tasks ✔%s+[<%d%.]+ms'), 'a fast plugin has no time: ' .. got[1])
-        h.ok(got[3]:find('✘ plugin3%s+later%s+failed%s+2 of 2 tasks%s+[<%d%.]+ms'), got[3])
+        h.ok(got[1]:find('✔ plugin1%s+later%s+loaded%s+.*2 of 2%s+tasks'), got[1])
+        h.ok(got[1]:find('2 of 2%s+tasks ✔.+[<%d%.]+ms'), 'a fast plugin has no time: ' .. got[1])
+        h.ok(got[3]:find('✘ plugin3%s+later%s+failed%s+.*2 of 2%s+tasks.+[<%d%.]+ms'), got[3])
         h.ok(details_text():find('detail%s+boom'), 'the failed plugin is selected: ' .. details_text())
     end)
 end)
@@ -100,7 +100,7 @@ test('a running row shows its work, and the details show its output, until it is
     with_size(200, 50, function()
         h.ok(vim.wait(500, win_open), 'the window never opened')
         h.ok(vim.wait(500, function() return lines()[1]:find('installing', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('▶ slow%s+later%s+installing%s+1 of 2 tasks'), lines()[1])
+        h.ok(lines()[1]:find('▶ slow%s+later%s+installing%s+.*1 of 2%s+tasks'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
         h.ok(
             vim.wait(500, function() return details_text():find('Receiving objects: 45%', 1, true) end),
@@ -110,7 +110,7 @@ test('a running row shows its work, and the details show its output, until it is
         release()
         h.ok(tasks.wait(2000))
         h.ok(vim.wait(500, function() return lines()[1]:find('loaded', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('✔ slow%s+later%s+loaded%s+2 of 2 tasks'), lines()[1])
+        h.ok(lines()[1]:find('✔ slow%s+later%s+loaded%s+.*2 of 2%s+tasks'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
     end)
 end)
@@ -204,22 +204,61 @@ test(
             ui.open()
             h.ok(vim.wait(500, function() return lines()[3]:find('installing', 1, true) end), lines()[3])
             local got = lines()
-            h.ok(got[1]:find(' 1 of 1 tasks ✔ '), 'a loaded plugin is checked: ' .. got[1])
+            h.ok(got[1]:find(' 1 of 1 %s+tasks ✔ '), 'a loaded plugin is checked: ' .. got[1])
             h.ok(
-                got[2]:find(' 1 of 1 tasks  ') and not got[2]:find('✔', 5, true),
+                got[2]:find(' 1 of 1 %s+tasks ') and not got[2]:find('✔', 1, true),
                 'a failure is not: ' .. got[2]
             )
-            h.ok(got[3]:find(' 1 of 2 tasks '), got[3])
-            h.ok(got[4]:find(' 0 of 1 tasks '), got[4])
-            h.ok(groups_on(1).SarcinaTaskDone, 'a loaded plugin has a green pill')
-            h.ok(groups_on(2).SarcinaTaskFailed, 'a failed plugin has a red pill')
-            h.ok(groups_on(3).SarcinaTaskRunning, 'a running plugin has a blue pill')
-            h.ok(groups_on(4).SarcinaTaskIdle, 'a plugin that has not started has a grey pill')
+            h.ok(got[3]:find(' 1 of 2 %s+tasks '), got[3])
+            h.ok(got[4]:find(' 0 of 1 %s+tasks '), got[4])
+            -- Each widget has four parts, in the colour of its state: the two ends, the count and the label.
+            for line, kind in pairs({ [1] = 'Done', [2] = 'Failed', [3] = 'Running', [4] = 'Idle' }) do
+                local groups = groups_on(line)
+                for _, suffix in ipairs({ 'Left', 'Count', '', 'Right' }) do
+                    h.ok(
+                        groups['SarcinaPill' .. kind .. suffix],
+                        'row ' .. line .. ' has no SarcinaPill' .. kind .. suffix
+                    )
+                end
+            end
             release()
             h.ok(tasks.wait(2000))
         end)
     end
 )
+
+test('the tasks widget has rounded ends unless rounded is off, and the columns stay aligned', function()
+    local cap_left, cap_right = vim.fn.nr2char(0xe0b6), vim.fn.nr2char(0xe0b4)
+    h.register({
+        loaded('a'),
+        { name = 'bb', tasks = { h.lua('rtp', function() error('no') end) } },
+        loaded('c'),
+    })
+    h.run({ loaded('a'), { name = 'bb', tasks = { h.lua('rtp', function() error('no') end) } } })
+    with_size(200, 50, function()
+        ui.open()
+        local got = lines()
+        for _, line in ipairs(got) do
+            h.ok(
+                line:find(cap_left, 1, true) and line:find(cap_right, 1, true),
+                'a row has no round ends: ' .. line
+            )
+        end
+        h.eq(vim.fn.strdisplaywidth(got[1]), vim.fn.strdisplaywidth(got[2]))
+        h.eq(vim.fn.strdisplaywidth(got[2]), vim.fn.strdisplaywidth(got[3]))
+        ui.configure({ rounded = false })
+        ui.open()
+        for _, line in ipairs(lines()) do
+            h.ok(
+                not line:find(cap_left, 1, true) and not line:find(cap_right, 1, true),
+                'a flat row has ends: ' .. line
+            )
+        end
+        h.eq(vim.fn.strdisplaywidth(lines()[1]), vim.fn.strdisplaywidth(lines()[3]))
+        ui.configure(nil)
+        h.eq(window.rounded, true)
+    end)
+end)
 
 test('a plugin that waits for its trigger is yellow, with a yellow pill', function()
     local plugin = {
@@ -238,27 +277,45 @@ test('a plugin that waits for its trigger is yellow, with a yellow pill', functi
         h.ok(lines()[1]:find('○ waits%s+trigger%s+waiting'), lines()[1])
         local groups = groups_on(1)
         h.ok(groups.SarcinaWaiting, 'the glyph and the state are not yellow')
-        h.ok(groups.SarcinaTaskWaiting, 'the pill is not yellow')
+        h.ok(groups.SarcinaPillWaitingCount and groups.SarcinaPillWaiting, 'the pill is not yellow')
         h.ok(not lines()[1]:find('✔', 1, true), 'a plugin that waits is not complete: ' .. lines()[1])
         h.eq(vim.api.nvim_get_hl(0, { name = 'SarcinaWaiting', link = true }).link, 'DiagnosticWarn')
     end)
 end)
 
 test(
-    'a pill takes its colour from the colorscheme: a light background and a darker text of one hue',
+    'a pill takes its colour from the colorscheme: a bold dark count on it, a light label with darker text',
     function()
         vim.api.nvim_set_hl(0, 'DiagnosticOk', { fg = 0x33cc33 })
-        vim.cmd('highlight clear SarcinaTaskDone')
+        for _, suffix in ipairs({ 'Left', 'Count', '', 'Right' }) do
+            vim.cmd('highlight clear SarcinaPillDone' .. suffix)
+        end
         window.define_highlights()
-        local pill = vim.api.nvim_get_hl(0, { name = 'SarcinaTaskDone', link = false })
+        local function get(suffix)
+            return vim.api.nvim_get_hl(0, { name = 'SarcinaPillDone' .. suffix, link = false })
+        end
         local function channels(color)
             return { bit.rshift(color, 16), bit.band(bit.rshift(color, 8), 0xff), bit.band(color, 0xff) }
         end
-        local fg, bg = channels(pill.fg), channels(pill.bg)
-        h.ok(fg[2] > fg[1] and fg[2] > fg[3], 'the text is not green: ' .. vim.inspect(fg))
-        h.ok(bg[2] > bg[1] and bg[2] >= bg[3], 'the background is not green: ' .. vim.inspect(bg))
-        h.ok(bg[1] + bg[2] + bg[3] > fg[1] + fg[2] + fg[3], 'the background is not lighter than the text')
-        h.ok(bg[2] > 200, 'the background is not light: ' .. vim.inspect(bg))
+        local function total(color)
+            return vim.iter(channels(color)):fold(0, function(a, b) return a + b end)
+        end
+        local count, label, left, right = get('Count'), get(''), get('Left'), get('Right')
+        h.eq(count.bg, 0x33cc33)
+        h.eq(count.bold, true)
+        h.ok(
+            total(count.fg) < total(count.bg) / 3,
+            'the count text is not dark: ' .. vim.inspect(channels(count.fg))
+        )
+        local fg, bg = channels(label.fg), channels(label.bg)
+        h.ok(fg[2] > fg[1] and fg[2] > fg[3], 'the label text is not green: ' .. vim.inspect(fg))
+        h.ok(
+            bg[2] >= bg[1] and bg[2] >= bg[3] and bg[2] > 200,
+            'the label is not a light green: ' .. vim.inspect(bg)
+        )
+        h.ok(total(label.bg) > total(label.fg), 'the label is not lighter than its text')
+        -- An end only has a foreground, so the cell behind it stays the window's and it looks round.
+        h.eq({ left.fg, left.bg, right.fg, right.bg }, { count.bg, nil, label.bg, nil })
     end
 )
 
@@ -439,7 +496,7 @@ test('the details show where a plugin comes from, what it waits for, and each of
         local text = details_text()
         for _, expected in ipairs({
             'state%s+✔ loaded',
-            'tasks%s+2 of 2 tasks · %d+ms',
+            'tasks%s+.*2 of 2%s+tasks ✔.*%d+ms',
             'timing%s+trigger',
             'src%s+owner/detailed',
             'deps%s+depone, deptwo',
@@ -725,8 +782,9 @@ if vim.fn.executable('git') == 1 then
         tasks.run_all(nil, { quiet = true })
         h.ok(vim.wait(2000, win_open), 'the window never opened for the clone')
         h.ok(tasks.wait(5000))
-        h.ok(vim.wait(500, function() return lines()[1]:find('loaded', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('✔ clonewin.nvim%s+later%s+loaded%s+2 of 2 tasks'), lines()[1])
+        -- At 80 columns the state word gives way, and the glyph and the check say it.
+        h.ok(vim.wait(500, function() return lines()[1]:find('✔ clonewin', 1, true) end), lines()[1])
+        h.ok(lines()[1]:find('✔ clonewin.nvim%s+later%s+.*2 of 2%s+tasks ✔'), lines()[1])
     end)
 
     test(
@@ -786,7 +844,7 @@ if vim.fn.executable('git') == 1 then
         )
         local seen = run_child(spec)
         h.eq(seen.open, true)
-        h.ok(seen.lines[1]:find('✔ winchild.nvim%s+later%s+loaded%s+3 of 3 tasks'), vim.inspect(seen.lines))
+        h.ok(seen.lines[1]:find('✔ winchild.nvim%s+later%s+.*3 of 3%s+tasks ✔'), vim.inspect(seen.lines))
     end)
 
     test('in a real startup with everything installed no window opens', function()

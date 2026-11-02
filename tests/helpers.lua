@@ -32,6 +32,8 @@ function M.reset()
     require('sarcina.stats')._reset()
     require('sarcina.window').forget()
     require('sarcina.installs')._reset()
+    vim.fn.delete(require('sarcina.paths').lock_file())
+    require('sarcina.lock')._reset()
     pcall(vim.api.nvim_del_augroup_by_name, 'SarcinaUI')
     _G.lazy_log = nil
     local ui = require('sarcina.ui')

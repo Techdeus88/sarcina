@@ -16,6 +16,8 @@ local GLYPH = {
     pending = '…',
     installing = '▶',
     building = '▶',
+    updating = '▶',
+    checking = '▶',
     loading = '▶',
     waiting = '○',
     loaded = '✔',
@@ -26,6 +28,8 @@ local HL = {
     pending = 'SarcinaPending',
     installing = 'SarcinaRunning',
     building = 'SarcinaRunning',
+    updating = 'SarcinaRunning',
+    checking = 'SarcinaRunning',
     loading = 'SarcinaRunning',
     waiting = 'SarcinaWaiting',
     loaded = 'SarcinaDone',
@@ -40,7 +44,7 @@ local STEP_HL = {
     failed = 'SarcinaFailed',
     skipped = 'SarcinaSkipped',
 }
-local ACTIVE = { installing = true, building = true, loading = true }
+local ACTIVE = { installing = true, building = true, updating = true, checking = true, loading = true }
 local HL_LINKS = {
     SarcinaPending = 'Comment',
     SarcinaWaiting = 'DiagnosticWarn',
@@ -61,6 +65,8 @@ local HL_LINKS = {
     SarcinaStepLoad = 'Type',
     SarcinaStepKeys = 'Identifier',
     SarcinaStepAfter = 'Statement',
+    SarcinaStepUpdate = 'Number',
+    SarcinaStepCheck = 'PreProc',
     SarcinaStepOther = 'Normal',
 }
 -- Each task of a plan has a colour of its own in the details, so the lines stand out from each other.
@@ -73,6 +79,8 @@ local STEP_GROUP = {
     load = 'SarcinaStepLoad',
     keys = 'SarcinaStepKeys',
     after = 'SarcinaStepAfter',
+    update = 'SarcinaStepUpdate',
+    check = 'SarcinaStepCheck',
 }
 
 local NAME_MAX, NAME_MIN, TAG_W, STATE_W, TIME_W = 28, 10, 7, 10, 6
@@ -108,25 +116,33 @@ local view = {
 -- The header is two lines and the footer one, each with two borders.
 local HEADER_OUTER, FOOTER_OUTER = 4, 3
 
--- The tasks widget of a row is a pill: a light background in the colour of the state, with the text in a
--- darker shade of the same colour. `from` is the group whose colour it takes, `fallback` is used when the
--- colorscheme gives that group none.
+--- Whether the tasks widget has rounded ends. They are Powerline glyphs, which need a patched font; without
+--- one, set `ui = { rounded = false }` in setup() for flat ends.
+M.rounded = true
+
+local CAP_LEFT, CAP_RIGHT = vim.fn.nr2char(0xe0b6), vim.fn.nr2char(0xe0b4)
+
+-- The tasks widget of a row is a button: rounded ends and two tones. The count (`3 of 8`) is in the colour of
+-- the state, in dark bold text; the label (`tasks`) is a light tint of it, in a darker shade. `from` is the
+-- group whose colour it takes, `fallback` is used when the colorscheme gives that group none.
 local PILLS = {
-    SarcinaTaskDone = { from = 'DiagnosticOk', fallback = 0x98c379 },
-    SarcinaTaskRunning = { from = 'DiagnosticInfo', fallback = 0x61afef },
-    SarcinaTaskWaiting = { from = 'DiagnosticWarn', fallback = 0xe5c07b },
-    SarcinaTaskFailed = { from = 'DiagnosticError', fallback = 0xe06c75 },
-    SarcinaTaskIdle = { from = 'Comment', fallback = 0x9099a5 },
+    Done = { from = 'DiagnosticOk', fallback = 0x98c379 },
+    Running = { from = 'DiagnosticInfo', fallback = 0x61afef },
+    Waiting = { from = 'DiagnosticWarn', fallback = 0xe5c07b },
+    Failed = { from = 'DiagnosticError', fallback = 0xe06c75 },
+    Idle = { from = 'Comment', fallback = 0x9099a5 },
 }
 local PILL = {
-    pending = 'SarcinaTaskIdle',
-    installing = 'SarcinaTaskRunning',
-    building = 'SarcinaTaskRunning',
-    loading = 'SarcinaTaskRunning',
-    waiting = 'SarcinaTaskWaiting',
-    loaded = 'SarcinaTaskDone',
-    blocked = 'SarcinaTaskIdle',
-    failed = 'SarcinaTaskFailed',
+    pending = 'Idle',
+    installing = 'Running',
+    building = 'Running',
+    updating = 'Running',
+    checking = 'Running',
+    loading = 'Running',
+    waiting = 'Waiting',
+    loaded = 'Done',
+    blocked = 'Idle',
+    failed = 'Failed',
 }
 
 -- `color` moved `ratio` of the way to `toward`, both 0xRRGGBB.
@@ -150,13 +166,22 @@ function M.define_highlights()
         'SarcinaStepTime',
         { bold = true, fg = vim.api.nvim_get_hl(0, { name = 'Normal', link = false }).fg, default = true }
     )
-    for name, pill in pairs(PILLS) do
+    -- Each kind has four groups: the count, the label, and the two ends. An end only sets its foreground,
+    -- so the cell behind it stays the window's (or the cursor line's) and the end looks round.
+    for kind, pill in pairs(PILLS) do
         local color = vim.api.nvim_get_hl(0, { name = pill.from, link = false }).fg or pill.fallback
-        vim.api.nvim_set_hl(
-            0,
-            name,
-            { fg = mix(color, 0x000000, 0.6), bg = mix(color, 0xffffff, 0.75), default = true }
-        )
+        local count_bg, label_bg = color, mix(color, 0xffffff, 0.8)
+        local function set(suffix, attrs)
+            vim.api.nvim_set_hl(
+                0,
+                'SarcinaPill' .. kind .. suffix,
+                vim.tbl_extend('force', attrs, { default = true })
+            )
+        end
+        set('Left', { fg = count_bg })
+        set('Count', { fg = mix(color, 0x000000, 0.85), bg = count_bg, bold = true })
+        set('', { fg = mix(color, 0x000000, 0.55), bg = label_bg })
+        set('Right', { fg = label_bg })
     end
 end
 
@@ -179,11 +204,24 @@ local function format_time(ms)
     return string.format('%.1fs', ms / 1000)
 end
 
-local function progress_text(task, tasks) return string.format('%d of %d tasks', task, tasks) end
+-- The tasks widget as `{ text, group }` parts: the count, then the label, with a check once every task of
+-- the plugin is done, and rounded ends unless `rounded` is off.
+local function pill_parts(task, tasks, state)
+    local kind = 'SarcinaPill' .. PILL[state]
+    local parts = {}
+    if M.rounded then table.insert(parts, { CAP_LEFT, kind .. 'Left' }) end
+    table.insert(parts, { string.format(' %d of %d ', task, tasks), kind .. 'Count' })
+    table.insert(parts, { state == 'loaded' and ' tasks ✔ ' or ' tasks ', kind })
+    if M.rounded then table.insert(parts, { CAP_RIGHT, kind .. 'Right' }) end
+    return parts
+end
 
--- The text of the tasks widget: how far the plugin is, with a check when all of it is done.
-local function pill_text(task, tasks, complete)
-    return ' ' .. progress_text(task, tasks) .. (complete and ' ✔' or '') .. ' '
+local function parts_width(parts)
+    local width = 0
+    for _, part in ipairs(parts) do
+        width = width + width_of(part[1])
+    end
+    return width
 end
 
 --- The one-line numbers of `stats.get()`.
@@ -230,9 +268,9 @@ local function row_line(row)
         table.insert(parts, { pad(row.state, STATE_W), group })
     end
     table.insert(parts, { ' ' })
-    local pill = pill_text(row.task, row.tasks, row.state == 'loaded')
-    table.insert(parts, { pill, PILL[row.state] })
-    table.insert(parts, { string.rep(' ', view.progress_w - width_of(pill)) })
+    local pill = pill_parts(row.task, row.tasks, row.state)
+    vim.list_extend(parts, pill)
+    table.insert(parts, { string.rep(' ', view.progress_w - parts_width(pill)) })
     table.insert(parts, { ' ' })
     table.insert(parts, { string.rep(' ', TIME_W - width_of(time)) .. time, 'SarcinaNote' })
     if view.detail > 0 then
@@ -285,7 +323,7 @@ local function measure(list)
     local name_w, progress_w = 0, 0
     for _, row in ipairs(list) do
         name_w = math.max(name_w, width_of(row.name))
-        progress_w = math.max(progress_w, width_of(pill_text(row.tasks, row.tasks, true)))
+        progress_w = math.max(progress_w, parts_width(pill_parts(row.tasks, row.tasks, 'loaded')))
     end
     name_w = math.min(name_w, NAME_MAX)
     local with_state = 3 + name_w + 1 + TAG_W + 1 + STATE_W + 1 + progress_w + 1 + TIME_W + 1
@@ -505,10 +543,10 @@ function M.draw_details(buf)
         end
         local triggered = type(spec.triggers) == 'table'
         add('state', GLYPH[row.state] .. ' ' .. row.state, HL[row.state])
-        add(
-            'tasks',
-            progress_text(row.task, row.tasks) .. (row.duration and ' · ' .. format_time(row.duration) or '')
-        )
+        local widget = { { pad('tasks', KEY_W + 1), 'SarcinaTag' } }
+        vim.list_extend(widget, pill_parts(row.task, row.tasks, row.state))
+        if row.duration then table.insert(widget, { ' ' .. format_time(row.duration), 'SarcinaStepTime' }) end
+        table.insert(lines, build_line(widget))
         add('timing', row.timing)
         add('src', spec.repo)
         add('path', vim.fn.fnamemodify(dir, ':~'))
