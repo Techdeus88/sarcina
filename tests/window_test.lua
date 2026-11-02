@@ -2,7 +2,6 @@ local h = require('helpers')
 local executors = require('sarcina.executors')
 local factory = require('sarcina.task_factory')
 local paths = require('sarcina.paths')
-local stats = require('sarcina.stats')
 local tasks = require('sarcina.tasks')
 local ui = require('sarcina.ui')
 local window = require('sarcina.window')
@@ -140,25 +139,28 @@ test('a running row shows its work, and the details show its output, until it is
     end)
 end)
 
-test('the header counts the plugins and the footer points at the select view, with the startup time', function()
-    local plugins = {
-        { name = 'slow', tasks = { { id = 'rtp', type = 'w_slow' } } },
-        loaded('fast'),
-        { name = 'eager', timing = 'now', tasks = { h.lua('rtp', h.noop) } },
-    }
-    h.register(plugins)
-    h.run(plugins)
-    with_size(200, 50, function()
-        ui.open()
-        h.eq(header_text(), ' Total: 3 plugins')
-        local got = footer()
-        h.eq(#got, 1)
-        h.ok(vim.startswith(got[1], ' v to select plugins'), got[1])
-        h.ok(not got[1]:find('Now %d'), 'the timing numbers are in the sections: ' .. got[1])
-        h.ok(got[1]:find('%s+Startup: [%d…]'), got[1])
-        h.ok(not got[1]:find('slowest', 1, true), 'the slowest plugins are gone: ' .. got[1])
-    end)
-end)
+test(
+    'the header counts the plugins and the footer points at the select view, with the startup time',
+    function()
+        local plugins = {
+            { name = 'slow', tasks = { { id = 'rtp', type = 'w_slow' } } },
+            loaded('fast'),
+            { name = 'eager', timing = 'now', tasks = { h.lua('rtp', h.noop) } },
+        }
+        h.register(plugins)
+        h.run(plugins)
+        with_size(200, 50, function()
+            ui.open()
+            h.eq(header_text(), ' Total: 3 plugins')
+            local got = footer()
+            h.eq(#got, 1)
+            h.ok(vim.startswith(got[1], ' v to select plugins'), got[1])
+            h.ok(not got[1]:find('Now %d'), 'the timing numbers are in the sections: ' .. got[1])
+            h.ok(got[1]:find('%s+Startup: [%d…]'), got[1])
+            h.ok(not got[1]:find('slowest', 1, true), 'the slowest plugins are gone: ' .. got[1])
+        end)
+    end
+)
 
 test('the footer shows the startup time in milliseconds once the UI is up', function()
     h.register({ loaded('a') })
@@ -994,6 +996,38 @@ test('closing the list closes the other three windows, and so does q', function(
     end)
 end)
 
+test(
+    'the cursor rests only on rows of plugins, going on the way it moved past headers and blank lines',
+    function()
+        h.register({ { name = 'n1', timing = 'now' }, loaded('l1'), loaded('l2') })
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        -- 1 Now, 2 n1, 3 blank, 4 Later, 5 l1, 6 l2
+        local function move(lnum)
+            vim.api.nvim_win_set_cursor(ui._winid, { lnum, 0 })
+            vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+            return vim.api.nvim_win_get_cursor(ui._winid)[1], window.selected()
+        end
+        h.eq({ move(2) }, { 2, 'n1' })
+        h.eq({ move(3) }, { 5, 'l1' }) -- down onto the blank line: on to l1
+        h.eq({ move(6) }, { 6, 'l2' })
+        h.eq({ move(4) }, { 2, 'n1' }) -- up onto the Later header: back to n1
+        h.eq({ move(1) }, { 2, 'n1' }) -- nothing above the first header: the first plugin below it
+        h.eq(title_of(ui._detail_winid), ' n1 ')
+    end
+)
+
+test('a line with no plugin shows no details', function()
+    h.register({ loaded('a') })
+    ui.open()
+    window.select(1) -- the Later header
+    h.eq(window.selected(), nil)
+    h.eq(window.draw_details(ui._detail_bufnr), nil)
+    h.eq(details(), { '' })
+    window.select(2)
+    h.eq(window.draw_details(ui._detail_bufnr), 'a')
+end)
+
 test('entry_at maps the lines of the list to their plugins', function()
     h.register({ loaded('a'), loaded('b') })
     ui.open()
@@ -1121,43 +1155,46 @@ test(
     end
 )
 
-test('v opens the select view, Space picks, the footer names the picks, and v leaves and drops them', function()
-    local plugins = {}
-    for _, name in ipairs({ 'sa', 'sb', 'sc' }) do
-        table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
-    end
-    h.register(plugins)
-    h.run(plugins)
-    with_size(200, 50, function()
-        ui.open()
-        vim.api.nvim_set_current_win(ui._winid)
-        local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
-        local function row(name)
-            for _, line in ipairs(lines()) do
-                if line:find(name, 1, true) then return line end
-            end
+test(
+    'v opens the select view, Space picks, the footer names the picks, and v leaves and drops them',
+    function()
+        local plugins = {}
+        for _, name in ipairs({ 'sa', 'sb', 'sc' }) do
+            table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
         end
-        press('<Space>') -- outside the select view it does nothing
-        h.eq(window.marked(), {})
-        press('v')
-        h.ok(row('sa'):find('^ ○ sa'), row('sa'))
-        h.ok(footer()[1]:find('Space picks a plugin', 1, true), footer()[1])
-        vim.api.nvim_win_set_cursor(ui._winid, { window.line('sa'), 0 })
-        press('<Space>')
-        vim.api.nvim_win_set_cursor(ui._winid, { window.line('sc'), 0 })
-        press('<Space>')
-        h.eq(window.marked(), { 'sa', 'sc' })
-        h.ok(row('sa'):find('^ ✔ sa'), row('sa'))
-        h.ok(row('sb'):find('^ ○ sb'), row('sb'))
-        h.ok(footer()[1]:find('Selected 2', 1, true) and footer()[1]:find(' sa ', 1, true), footer()[1])
-        press('<Space>') -- on a picked row it drops the pick
-        h.eq(window.marked(), { 'sa' })
-        press('v')
-        h.eq(window.marked(), {})
-        h.ok(row('sa'):find('^   sa'), row('sa'))
-        h.ok(vim.startswith(footer()[1], ' v to select plugins'), footer()[1])
-    end)
-end)
+        h.register(plugins)
+        h.run(plugins)
+        with_size(200, 50, function()
+            ui.open()
+            vim.api.nvim_set_current_win(ui._winid)
+            local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
+            local function row(name)
+                for _, line in ipairs(lines()) do
+                    if line:find(name, 1, true) then return line end
+                end
+            end
+            press('<Space>') -- outside the select view it does nothing
+            h.eq(window.marked(), {})
+            press('v')
+            h.ok(row('sa'):find('^ ○ sa'), row('sa'))
+            h.ok(footer()[1]:find('Space picks a plugin', 1, true), footer()[1])
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line('sa'), 0 })
+            press('<Space>')
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line('sc'), 0 })
+            press('<Space>')
+            h.eq(window.marked(), { 'sa', 'sc' })
+            h.ok(row('sa'):find('^ ✔ sa'), row('sa'))
+            h.ok(row('sb'):find('^ ○ sb'), row('sb'))
+            h.ok(footer()[1]:find('Selected 2', 1, true) and footer()[1]:find(' sa ', 1, true), footer()[1])
+            press('<Space>') -- on a picked row it drops the pick
+            h.eq(window.marked(), { 'sa' })
+            press('v')
+            h.eq(window.marked(), {})
+            h.ok(row('sa'):find('^   sa'), row('sa'))
+            h.ok(vim.startswith(footer()[1], ' v to select plugins'), footer()[1])
+        end)
+    end
+)
 
 test('the action keys act on the picks of the select view, and leave it', function()
     local plugins = {}

@@ -347,20 +347,22 @@ local function section_line(title, count, extra)
     return build_line(vim.list_extend(parts, extra or {}))
 end
 
--- What the Updates header says after its count: that a check runs, that nothing was found, how many remotes
--- could not say, and the key for the changelog.
-local function updates_note(check, found)
-    local parts = {}
+-- The title of the list window while a check runs or after one that had something to check, on the top border
+-- level with the name of the plugin over the details: `Updates (N)`, then that a check runs, that nothing was
+-- found, how many remotes could not say, and the key for the changelog. '' for no title.
+local function updates_title()
+    local check = checker().state()
+    if not (check.running or check.total > 0) then return '' end
+    local found = vim.tbl_count(check.updates)
+    local parts = { { string.format(' Updates (%d) ', found), 'SarcinaSection' } }
     if check.running then
-        table.insert(parts, { '  ↻ checking…', 'SarcinaNote' })
+        table.insert(parts, { '↻ checking… ', 'SarcinaNote' })
     elseif found == 0 then
-        table.insert(parts, { '  ✔ up to date', 'SarcinaDone' })
+        table.insert(parts, { '✔ up to date ', 'SarcinaDone' })
     end
     local failed = vim.tbl_count(check.failed)
-    if failed > 0 then
-        table.insert(parts, { '  ' .. plural(failed, 'remote') .. ' failed', 'SarcinaFailed' })
-    end
-    if found > 0 then table.insert(parts, { '  <CR> changelog', 'SarcinaNote' }) end
+    if failed > 0 then table.insert(parts, { plural(failed, 'remote') .. ' failed ', 'SarcinaFailed' }) end
+    if found > 0 then table.insert(parts, { '<CR> changelog ', 'SarcinaNote' }) end
     return parts
 end
 
@@ -415,8 +417,8 @@ local function shown_order(list)
     return order
 end
 
--- The lines of the list: an Updates section while a check runs or after one that had something to check, then a
--- section per timing. Sections are a blank line apart. Fills `entries`, `line_of`, `rows` and `names`.
+-- The lines of the list: the updates a check found, under the Updates title of the window, then a section per
+-- timing. Sections are a blank line apart. Fills `entries`, `line_of`, `rows` and `names`.
 local function layout(list)
     local lines = {}
     local function add(line, entry)
@@ -428,11 +430,8 @@ local function layout(list)
     for _, row in ipairs(list) do
         if check.updates[row.name] then table.insert(found, row.name) end
     end
-    if check.running or check.total > 0 then
-        add(section_line('Updates', #found, updates_note(check, #found)), { kind = 'section' })
-        for _, name in ipairs(found) do
-            add(update_line(name, check.updates[name]), { kind = 'update', name = name })
-        end
+    for _, name in ipairs(found) do
+        add(update_line(name, check.updates[name]), { kind = 'update', name = name })
     end
     local by_timing = grouped(list)
     for _, section in ipairs(SECTIONS) do
@@ -619,7 +618,15 @@ function M.config()
     local middle_row = row + HEADER_OUTER
     local config = {
         header = { relative = 'editor', row = row, col = col, width = view.full_w, height = 2 },
-        list = { relative = 'editor', row = middle_row, col = col, width = view.list_w, height = view.middle },
+        list = {
+            relative = 'editor',
+            row = middle_row,
+            col = col,
+            width = view.list_w,
+            height = view.middle,
+            title = updates_title(),
+            title_pos = 'left',
+        },
         footer = {
             relative = 'editor',
             row = middle_row + view.middle + 2,
@@ -651,7 +658,7 @@ function M.target()
             failed = line_of[name]
         end
     end
-    return active or failed or 1
+    return active or failed or line_of[names[1]] or 1
 end
 
 --- What a line of the list shows.
@@ -686,10 +693,23 @@ function M.clear_marks() marked = {} end
 --- The plugin the details show.
 function M.selected() return selected end
 
---- The cursor is on line `lnum` of the list: the details show that plugin.
+--- The cursor is on line `lnum` of the list: the details show the plugin of that row, and nothing when the line
+--- names no plugin.
 function M.select(lnum)
     local entry = entries[lnum]
-    if entry and entry.name then selected = entry.name end
+    selected = entry and entry.name or nil
+end
+
+--- The line of a plugin nearest line `lnum`, looking `step` (1 down, -1 up) first and then the other way, or nil
+--- when the list has no plugin. The cursor only rests on rows of plugins.
+function M.nearest(lnum, step)
+    for _, way in ipairs({ step, -step }) do
+        local at = lnum
+        while entries[at] do
+            if entries[at].name then return at end
+            at = at + way
+        end
+    end
 end
 
 --- The window closed: the next one starts with a fresh selection.

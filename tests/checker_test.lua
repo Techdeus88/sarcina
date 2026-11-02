@@ -162,7 +162,14 @@ test(
     end
 )
 
-test('while a check runs the Updates section says checking, and then lists each update', function()
+-- The title on the top border of the list, as text.
+local function list_title()
+    local title = vim.api.nvim_win_get_config(ui._winid).title
+    if type(title) ~= 'table' then return title or '' end
+    return table.concat(vim.tbl_map(function(chunk) return chunk[1] end, title))
+end
+
+test('while a check runs the list title says checking, and then the list starts with each update', function()
     local remote = behind_by_three('upd.nvim')
     h.register({ spec('upd.nvim', remote), { name = 'other' } })
     window.rounded = false
@@ -170,38 +177,43 @@ test('while a check runs the Updates section says checking, and then lists each 
     ui.open()
     checker.run()
     ui._flush()
-    h.eq(buffer_lines()[1], ' Updates (0)  ↻ checking…')
+    h.eq(list_title(), ' Updates (0) ↻ checking… ')
     finished()
     ui._flush()
+    h.eq(list_title(), ' Updates (1) <CR> changelog ')
+    -- The title sits on the top border, level with the name of the plugin over the details.
+    local list, detail = vim.api.nvim_win_get_config(ui._winid), vim.api.nvim_win_get_config(ui._detail_winid)
+    h.eq(list.row, detail.row)
     local lines = buffer_lines()
-    h.eq(lines[1], ' Updates (1)  <CR> changelog')
     h.eq(
-        lines[2],
+        lines[1],
         '   ↑ upd.nvim ' .. h.head(remote):sub(1, 7) .. ' feat: two · 3 commits behind  △ 2 breaking'
     )
-    h.eq(lines[3], '')
-    h.eq(window.entry_at(2), { kind = 'update', name = 'upd.nvim' })
+    h.eq(lines[2], '')
+    h.eq(lines[3], ' Later (2)')
+    h.eq(window.entry_at(1), { kind = 'update', name = 'upd.nvim' })
     -- The cursor moves onto an update, and the details show that plugin.
-    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+    vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
     vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
     h.eq(window.selected(), 'upd.nvim')
     h.ok(details_text():find('update%s+%x+ · 3 commits behind  △ 2 breaking'), details_text())
     window.rounded = true
 end)
 
-test('a check that found nothing says up to date, and one with nothing to check shows no section', function()
+test('a check that found nothing says up to date, and with nothing to check the list has no title', function()
     local remote = h.upstream()
     installed('fresh.nvim', remote)
     h.register({ spec('fresh.nvim', remote) })
     ui.open()
     check()
     ui._flush()
-    h.eq(buffer_lines()[1], ' Updates (0)  ✔ up to date')
+    h.eq(list_title(), ' Updates (0) ✔ up to date ')
+    h.eq(buffer_lines()[1], ' Later (1)')
     checker._reset()
     h.register({ { name = 'nothing' } })
     check()
     ui._flush()
-    h.eq(buffer_lines()[1], ' Later (1)')
+    h.eq(list_title(), '')
 end)
 
 test('enter shows the changelog of an update in the details, and enter again shows the tasks', function()
@@ -212,7 +224,7 @@ test('enter shows the changelog of an update in the details, and enter again sho
     check()
     ui._flush()
     vim.api.nvim_set_current_win(ui._winid)
-    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+    vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
     vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'xt', false)
     local text = details_text()

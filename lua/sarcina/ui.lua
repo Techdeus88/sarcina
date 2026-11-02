@@ -105,7 +105,7 @@ local function show_details()
     if not pane_valid('detail') then return end
     local win = pane_win('detail')
     local name = window().draw_details(pane_buf('detail'))
-    vim.api.nvim_win_set_config(win, { title = ' ' .. (name or '') .. ' ', title_pos = 'left' })
+    vim.api.nvim_win_set_config(win, { title = name and ' ' .. name .. ' ' or '', title_pos = 'left' })
     if name ~= shown then
         shown = name
         vim.api.nvim_win_call(win, function() vim.fn.winrestview({ topline = 1, lnum = 1, leftcol = 0 }) end)
@@ -118,8 +118,10 @@ end
 local function follow(opened, dirty)
     local before = window().selected()
     if not opened and vim.api.nvim_get_current_win() == M._winid then
+        -- A row of the same plugin, such as its update, keeps the cursor.
+        local at = window().entry_at(vim.api.nvim_win_get_cursor(M._winid)[1])
         local line = window().line(before)
-        if line then vim.api.nvim_win_set_cursor(M._winid, { line, 0 }) end
+        if line and not (at and at.name == before) then vim.api.nvim_win_set_cursor(M._winid, { line, 0 }) end
     else
         local line = window().target()
         vim.api.nvim_win_set_cursor(M._winid, { line, 0 })
@@ -284,8 +286,18 @@ local function ensure_buffer()
         desc = 'Show the changelog of a Sarcina update, or its tasks',
     })
     map_actions(M._bufnr)
-    vim.keymap.set('n', 'v', M.toggle_select, { buffer = M._bufnr, nowait = true, desc = 'Toggle the select view' })
-    vim.keymap.set('n', '<Space>', M.toggle_pick, { buffer = M._bufnr, nowait = true, desc = 'Pick a plugin' })
+    vim.keymap.set(
+        'n',
+        'v',
+        M.toggle_select,
+        { buffer = M._bufnr, nowait = true, desc = 'Toggle the select view' }
+    )
+    vim.keymap.set(
+        'n',
+        '<Space>',
+        M.toggle_pick,
+        { buffer = M._bufnr, nowait = true, desc = 'Pick a plugin' }
+    )
     for _, key in ipairs({ '<C-d>', '<C-u>' }) do
         vim.keymap.set(
             'n',
@@ -298,7 +310,18 @@ local function ensure_buffer()
         buffer = M._bufnr,
         callback = function()
             if not win_valid() then return end
-            window().select(vim.api.nvim_win_get_cursor(M._winid)[1])
+            -- The cursor rests only on rows of plugins: off a header or a blank line it goes on the way it moved.
+            local lnum = vim.api.nvim_win_get_cursor(M._winid)[1]
+            local entry = window().entry_at(lnum)
+            if not (entry and entry.name) then
+                local to = window().nearest(lnum, lnum < (M._last_lnum or 1) and -1 or 1)
+                if to then
+                    vim.api.nvim_win_set_cursor(M._winid, { to, 0 })
+                    lnum = to
+                end
+            end
+            M._last_lnum = lnum
+            window().select(lnum)
             show_details()
         end,
     })
