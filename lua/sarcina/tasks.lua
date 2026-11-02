@@ -6,6 +6,7 @@ local M = {}
 
 local ui = require('sarcina.ui')
 local executors = require('sarcina.executors')
+local installs = require('sarcina.installs')
 local track = require('sarcina.track')
 
 M.max_concurrent = 4
@@ -246,6 +247,8 @@ local function finish(plugin, job, ok, msg, ended)
         job.status = 'done'
         job.note = type(msg) == 'string' and msg or nil
         job.error = nil
+        -- An install that really cloned is worth remembering: the next session will not run it.
+        if is_install(job) and job.working then installs.record(job.plugin, job.duration) end
         emit(job)
     else
         job.error = tostring(msg or 'unknown error')

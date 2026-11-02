@@ -8,6 +8,9 @@ function M.plugins_dir() return vim.fn.stdpath('data') .. '/sarcina/plugins/' en
 
 function M.install(name) return M.plugins_dir() .. name end
 
+-- How long each plugin took to install, kept next to the plugins. See installs.lua.
+function M.installs_file() return vim.fn.stdpath('data') .. '/sarcina/installs.json' end
+
 function M.staging(name)
     return string.format('%s/sarcina_staging/%s_%d', vim.fn.stdpath('cache'), name, vim.uv.hrtime())
 end

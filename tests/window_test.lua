@@ -437,6 +437,19 @@ local function line_with(text)
     end
 end
 
+test('the tasks of a plugin that was installed before show installed, with the install time', function()
+    local plugin = generated('oldwin.nvim', { repo = 'x/oldwin' })
+    vim.fn.mkdir(paths.install('oldwin.nvim'), 'p')
+    require('sarcina.installs').record('oldwin.nvim', 2314.5)
+    h.register({ plugin })
+    h.run({ { name = 'oldwin.nvim', tasks = { plugin.tasks[2] } } })
+    with_size(200, 50, function()
+        ui.open()
+        h.ok(details_text():find('✔ install 2%.3s%s+installed'), details_text())
+        h.ok(not details_text():find('not needed', 1, true), details_text())
+    end)
+end)
+
 test('the details put a Tasks title above the tasks, and the time right after the task', function()
     local plugin = { name = 'titled', tasks = { h.lua('rtp', h.noop), { id = 'load', type = 'w_slow' } } }
     h.register({ plugin })
@@ -482,7 +495,7 @@ test('each task has a highlight of its own, and its time stands out from it', fu
         ui.open()
         local seen = {}
         for _, id in ipairs(ids) do
-            local lnum = line_with('✔ ' .. id)
+            local lnum = line_with('✔ ' .. id .. ' ')
             h.ok(lnum, id .. ' has no line: ' .. details_text())
             local marked = pieces(lnum)
             h.eq(marked[id], expected[id], id)
@@ -490,7 +503,7 @@ test('each task has a highlight of its own, and its time stands out from it', fu
             local time = details()[lnum]:match('%S+ ([<%d%.]+ms)')
             h.eq(marked[time], 'SarcinaStepTime', 'the time of ' .. id)
         end
-        h.eq(vim.tbl_count(seen), #ids - 1 + 1, 'two tasks share a highlight')
+        h.eq(vim.tbl_count(seen), #ids, 'two tasks share a highlight')
         h.eq(vim.api.nvim_get_hl(0, { name = 'SarcinaStepTime', link = false }).bold, true)
     end)
 end)

@@ -3,6 +3,7 @@
 -- the UI, and a row per plugin that says where it is in its tasks. Pure data. It reads the tracker and the
 -- load gate, and never requires ui, emits or subscribes.
 
+local installs = require('sarcina.installs')
 local load = require('sarcina.load')
 local track = require('sarcina.track')
 
@@ -173,8 +174,10 @@ function M.plugin(name)
 end
 
 --- The tasks of a plugin's plan in order, or nil for a plugin that is not registered: `id`, `status`,
---- `duration` in ms, `note`, `output` and `error` (its first line). A task that never ran because it had
---- nothing to do is `done` with the note `not needed`, and one that has not been created yet is `pending`.
+--- `duration` in ms, `note`, `output` and `error` (its first line). The install of a plugin that is already
+--- on disk was not run this session, so it is `done` with the note `installed` and, when the install was
+--- recorded (see installs.lua), the time it took. Another task that was skipped over is `done` with the
+--- note `not run`, and one that has not been created yet is `pending`.
 function M.steps(name)
     local entry = registered[name]
     if not entry then return end
@@ -185,7 +188,10 @@ function M.steps(name)
     return vim.tbl_map(function(step)
         local job = step.job
         if not job then
-            return { id = step.id, status = step.status, note = step.status == 'done' and 'not needed' or nil }
+            if step.status ~= 'done' then return { id = step.id, status = step.status } end
+            if step.id ~= 'install' then return { id = step.id, status = 'done', note = 'not run' } end
+            local record = installs.get(name)
+            return { id = 'install', status = 'done', duration = record and record.ms, note = 'installed' }
         end
         return {
             id = step.id,

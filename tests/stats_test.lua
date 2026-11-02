@@ -310,7 +310,7 @@ test(
         installed('stinst.nvim', 'stinst')
         begin({ { name = 'stinst.nvim', repo = 'x/stinst', opts = {} } })
         local steps = stats.steps('stinst.nvim')
-        h.eq({ steps[1].status, steps[1].note }, { 'done', 'not needed' })
+        h.eq({ steps[1].status, steps[1].note, steps[1].duration }, { 'done', 'installed', nil })
         h.eq({ steps[2].status, steps[3].status }, { 'pending', 'pending' })
         h.ok(tasks.wait(2000))
         steps = stats.steps('stinst.nvim')
@@ -318,6 +318,28 @@ test(
         h.ok(steps[2].duration ~= nil and steps[3].duration ~= nil, 'a task that ran has a duration')
     end
 )
+
+test(
+    'the install of a plugin on disk says installed, with the time it took when that was recorded',
+    function()
+        installed('stkept.nvim', 'stkept')
+        begin({ { name = 'stkept.nvim', repo = 'x/stkept', opts = {} } })
+        h.eq(stats.steps('stkept.nvim')[1].duration, nil)
+        require('sarcina.installs').record('stkept.nvim', 2314.5)
+        local install = stats.steps('stkept.nvim')[1]
+        h.eq({ install.status, install.note, install.duration }, { 'done', 'installed', 2314.5 })
+        h.ok(tasks.wait(2000))
+        h.eq(stats.steps('stkept.nvim')[1].duration, 2314.5)
+    end
+)
+
+test('a task skipped over, other than the install, says not run', function()
+    local plan = { name = 'stskip', tasks = { h.lua('before', h.noop), h.lua('rtp', h.noop) } }
+    h.register({ plan })
+    h.run({ { name = 'stskip', tasks = { plan.tasks[2] } } })
+    local before = stats.steps('stskip')[1]
+    h.eq({ before.status, before.note, before.duration }, { 'done', 'not run', nil })
+end)
 
 test('steps of a waiting triggered plugin have the trigger done and the deferred tasks pending', function()
     installed('stwait.nvim', 'stwait')

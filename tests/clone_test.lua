@@ -144,6 +144,20 @@ end)
 
 local function record_of(name) return paths.install(name) .. '/.git/sarcina-build' end
 
+test('a clone records how long the install took, and an install of what is on disk does not', function()
+    local installs = require('sarcina.installs')
+    local repo = make_repo()
+    h.run({ plugin('timed.nvim', { repo = repo }) })
+    local saved = installs.get('timed.nvim')
+    local took = h.job('timed.nvim', 'install').duration
+    h.ok(saved and saved.ms > 0 and math.abs(saved.ms - took) <= 0.05, vim.inspect(saved) .. ' vs ' .. took)
+    h.ok(vim.uv.fs_stat(paths.installs_file()), 'the records were not written to a file')
+    vim.wait(1100)
+    h.run({ plugin('timed.nvim', { repo = repo }) })
+    h.eq(h.job('timed.nvim', 'install').note, 'already installed')
+    h.eq(installs.get('timed.nvim'), saved)
+end)
+
 -- Starts a run of one plugin and returns once its build is running.
 local function start_run(spec_plugin)
     require('sarcina.tasks').enqueue(spec_plugin.name, spec_plugin)
