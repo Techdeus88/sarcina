@@ -41,6 +41,28 @@ end)
 
 test('completes subcommand names', function() h.eq(require('sarcina.cli').complete('pa'), { 'panel' }) end)
 
+test('completes the new subcommands, and the names of the plugins after check and update', function()
+    local cli = require('sarcina.cli')
+    h.eq(
+        { cli.complete('cl'), cli.complete('up'), cli.complete('ch') },
+        { { 'clean' }, { 'update' }, { 'check' } }
+    )
+    require('sarcina.stats').register({
+        { name = 'cmpone', timing = 'later' },
+        { name = 'cmptwo', timing = 'later' },
+    })
+    h.eq(cli.complete('cmp', 'Sarcina update cmp'), { 'cmpone', 'cmptwo' })
+    h.eq(cli.complete('cmpt', 'Sarcina check cmpt'), { 'cmptwo' })
+    h.eq(cli.complete('cmp', 'Sarcina panel cmp'), {})
+end)
+
+test(':Sarcina takes a bang, and help lists clean, check and update', function()
+    vim.cmd('runtime plugin/sarcina.lua')
+    h.eq(vim.api.nvim_get_commands({}).Sarcina.bang, true)
+    vim.cmd('Sarcina help')
+    h.ok(h.notified('clean, check, update'), vim.inspect(h.notes))
+end)
+
 test(
     'schema accepts a lua task with a closure',
     function() h.eq(schema.validate_task({ id = 'x', type = 'lua', fn = h.noop }), true) end

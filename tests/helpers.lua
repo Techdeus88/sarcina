@@ -77,6 +77,29 @@ function M.lua(id, fn, extra) return vim.tbl_extend('force', { id = id, type = '
 
 function M.noop() end
 
+--- Runs `git -C dir <args>` and returns what it printed, trimmed.
+function M.git(dir, ...) return vim.trim(vim.fn.system({ 'git', '-C', dir, ... })) end
+
+--- The commit `dir` is at.
+function M.head(dir) return M.git(dir, 'rev-parse', 'HEAD') end
+
+--- Adds a commit to the repo `dir`, which changes its tracked file.
+function M.advance(dir)
+    vim.fn.writefile({ tostring(vim.uv.hrtime()) }, dir .. '/tracked.txt')
+    M.git(dir, 'add', '-A')
+    M.git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'next')
+end
+
+--- A remote with a tracked file, which lets a fetch ask for a commit by its id, as GitHub does.
+function M.upstream()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, 'p')
+    M.git(dir, 'init', '-q')
+    M.git(dir, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
+    M.advance(dir)
+    return dir
+end
+
 --- A git repo with one empty commit, for clones and builds. Returns its path.
 function M.make_repo()
     local dir = vim.fn.tempname()

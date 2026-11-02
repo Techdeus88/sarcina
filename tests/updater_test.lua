@@ -12,26 +12,7 @@ local function test(name, fn) table.insert(tests, { name, fn }) end
 
 if vim.fn.executable('git') == 0 then return {} end
 
-local function git(dir, ...) return vim.trim(vim.fn.system({ 'git', '-C', dir, ... })) end
-
-local function head(dir) return git(dir, 'rev-parse', 'HEAD') end
-
--- Adds a commit to `dir`, which changes its tracked file.
-local function advance(dir)
-    vim.fn.writefile({ tostring(vim.uv.hrtime()) }, dir .. '/tracked.txt')
-    git(dir, 'add', '-A')
-    git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'next')
-end
-
--- A remote with a tracked file. It lets a fetch ask for a commit by its id, as GitHub does.
-local function upstream()
-    local dir = vim.fn.tempname()
-    vim.fn.mkdir(dir, 'p')
-    git(dir, 'init', '-q')
-    git(dir, 'config', 'uploadpack.allowAnySHA1InWant', 'true')
-    advance(dir)
-    return dir
-end
+local git, head, advance, upstream = h.git, h.head, h.advance, h.upstream
 
 -- The plugin `name`, cloned from `remote` the way sarcina does: shallow, into its install directory.
 local function clone(remote, name)
@@ -71,6 +52,7 @@ test('check reports an update without moving the plugin', function()
     h.eq(head(dir), before)
     h.ok(h.notified('1 update available: upchk.nvim'), vim.inspect(h.notes))
     h.ok(h.notified('Run :Sarcina update.'))
+    h.eq(vim.uv.fs_stat(paths.lock_file()), nil) -- a check changes nothing, so it keeps no lock
 end)
 
 test('update moves the plugin to the remote, rebuilds it once, and writes the lock file', function()

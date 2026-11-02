@@ -80,9 +80,14 @@ function M.dispatch(args)
         ui.emit('error', 'No sub‑command provided. Use :Sarcina help')
         return
     end
+    -- `:Sarcina clean!` puts the bang on the argument, `:Sarcina! clean` on the command. Both mean the same.
+    local bang = args.bang
+    if vim.endswith(cmd, '!') then
+        cmd, bang = cmd:sub(1, -2), true
+    end
     local fn = subcommands[cmd]
     if fn then
-        fn(rest, args)
+        fn(rest, vim.tbl_extend('force', args, { bang = bang }))
     else
         ui.emit('error', 'Unknown sub‑command: ' .. cmd)
     end

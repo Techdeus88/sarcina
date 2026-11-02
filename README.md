@@ -24,6 +24,8 @@ lua/sarcina/
 ├── installer.lua     queues a resolved manifest and runs it (:Sarcina install)
 ├── paths.lua         install and staging locations
 ├── installs.lua      how long each install took, kept in a JSON file for later sessions
+├── lock.lua          the lock file: the commit of every plugin, which fresh clones are pinned to
+├── updater.lua       :Sarcina check and :Sarcina update
 ├── schema.lua        manifest and task validation
 ├── ui.lua            event bus, toasts, and when the window opens
 └── window.lua        the floating window: the plugin list and a pane with the details of one
@@ -190,7 +192,7 @@ vim.api.nvim_create_autocmd('User', {
 | Field | Is |
 | --- | --- |
 | `timing` | `now`, `later` or `trigger` |
-| `state` | `pending`, `installing`, `building`, `loading`, `waiting` (for its trigger), `loaded`, `blocked` or `failed` |
+| `state` | `pending`, `installing`, `building`, `updating`, `checking`, `loading`, `waiting` (for its trigger), `loaded`, `blocked` or `failed` |
 | `task`, `tasks` | the plugin is at task `task` of `tasks`: its whole plan, with the tasks a trigger holds back counted. A task that never ran because it had nothing to do, such as the install of a plugin that is on disk, counts as done, and a loaded plugin reads `tasks` of `tasks` |
 | `detail` | the line that says more: git's or the build's latest output, the first line of an error, why a plugin is blocked, or what it waits for |
 | `duration` | milliseconds its tasks took in all, when they took any |
@@ -221,9 +223,31 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | Command | Does |
 | --- | --- |
 | `:Sarcina install` | resolve the manifest and run every plugin's tasks |
+| `:Sarcina check [plugins]` | fetch what each plugin's remote has and say which have an update. Nothing is changed |
+| `:Sarcina update [plugins]` | fetch, move each plugin to what its remote has, rebuild what moved, and write the lock file |
+| `:Sarcina clean` | list the plugin directories that are not in your specs |
+| `:Sarcina clean!` | delete them (`:Sarcina! clean` does the same) |
 | `:Sarcina panel` | toggle the window, and go into it |
 | `:Sarcina stats` | print the stats on one line |
 | `:Sarcina help` | list subcommands |
+
+`check` and `update` take plugin names, completed with Tab, and do every plugin of the manifest without any. They read your specs from disk, like `install`, and show up in the window as `checking` and `updating`.
+
+**`update`** fetches the default branch of each plugin (`git fetch --depth 1`), and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
+
+**`clean`** compares the directories in `stdpath('data')/sarcina/plugins` with the plugins of your specs, dependencies included. It refuses when the manifest is empty or does not resolve, so a spec that failed to load cannot make every plugin look removable. `clean!` also takes the plugin off `runtimepath` and out of the install times and the lock file. A plugin whose spec sets `dest` lives elsewhere and is never touched.
+
+### Lock file
+
+`stdpath('config')/sarcina-lock.json`, next to your specs so you can commit it, holds the commit of every plugin sarcina installed or updated:
+
+```json
+{
+  "telescope.nvim": { "commit": "9b5f7c1e0f6a2d4c8b1e3a7f5d2c9e4b6a8f0d13" }
+}
+```
+
+It is rewritten after any run that cloned or updated a plugin, and only the plugins of that run change: the other entries stay, so a plugin that failed to install keeps its pin. It also **pins fresh installs**: a clone checks out the commit the lock names, fetching it with `git fetch --depth 1 origin <commit>` when the shallow clone does not have it, and the branch still tracks its remote, so a later `update` moves on from the pin. If the locked commit cannot be fetched, that plugin's install fails with `locked commit 9b5f7c1 is not available`; delete its entry to install the latest. Run `:Sarcina update` to move the pins forward. There is no `restore` command yet.
 
 ## How the task engine works
 

@@ -10,6 +10,8 @@ local ui = require('sarcina.ui')
 
 local M = {}
 
+local PAST = { check = 'checked', update = 'updated' }
+
 -- The entries of `resolved` that `names` pick, in the resolver's order, or nil after saying which name is
 -- not a plugin. No names picks them all.
 local function select(resolved, names)
@@ -101,8 +103,8 @@ local function run(mode, resolved, names)
         ui.emit(
             'warn',
             'Not installed, so not '
-                .. mode
-                .. 'd: '
+                .. PAST[mode]
+                .. ': '
                 .. table.concat(missing, ', ')
                 .. '. Run :Sarcina install.'
         )

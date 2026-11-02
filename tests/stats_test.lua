@@ -265,6 +265,20 @@ test('an install shows as work only once it does real work, and says what it is 
     h.eq({ stats.plugin('stidle').state, stats.plugin('stbusy').state }, { 'loaded', 'loaded' })
 end)
 
+test('an update or a check that does real work shows as updating or checking', function()
+    local update = { name = 'stupdating', tasks = { { id = 'update', type = 's_hold' } } }
+    local check = { name = 'stchecking', tasks = { { id = 'check', type = 's_hold' } } }
+    h.register({ update, check })
+    tasks.enqueue('stupdating', update)
+    tasks.enqueue('stchecking', check)
+    tasks.run_all()
+    h.ok(vim.wait(500, function() return stats.plugin('stchecking').state == 'checking' end))
+    h.eq({ stats.plugin('stupdating').state, stats.plugin('stchecking').state }, { 'updating', 'checking' })
+    releases.stupdating()
+    releases.stchecking()
+    h.ok(tasks.wait(2000))
+end)
+
 test('a build that does real work shows as building', function()
     local plugin = { name = 'stbuild', tasks = { { id = 'build', type = 's_hold' }, h.lua('rtp', h.noop) } }
     h.register({ plugin })

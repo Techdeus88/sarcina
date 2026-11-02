@@ -579,7 +579,19 @@ test('the details put a Tasks title above the tasks, and the time right after th
 end)
 
 test('each task has a highlight of its own, and its time stands out from it', function()
-    local ids = { 'install', 'before', 'build', 'load_trigger', 'rtp', 'load', 'keys', 'after', 'custom' }
+    local ids = {
+        'install',
+        'before',
+        'build',
+        'load_trigger',
+        'rtp',
+        'load',
+        'keys',
+        'after',
+        'update',
+        'check',
+        'custom',
+    }
     local steps = {}
     for _, id in ipairs(ids) do
         table.insert(steps, h.lua(id, h.noop))
@@ -595,6 +607,8 @@ test('each task has a highlight of its own, and its time stands out from it', fu
         load = 'SarcinaStepLoad',
         keys = 'SarcinaStepKeys',
         after = 'SarcinaStepAfter',
+        update = 'SarcinaStepUpdate',
+        check = 'SarcinaStepCheck',
         custom = 'SarcinaStepOther',
     }
     with_size(200, 50, function()
