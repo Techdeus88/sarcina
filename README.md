@@ -316,11 +316,11 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
 
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Total: 6 plugins                                                                                           │
-│                                                13/25 tasks                                                 │
+│ Total: 6 plugins                                      ⤓ Installing 18/48 · telescope.nvim  ████░░░░░░  37% │
+│ ● 3  ○ 3                                       13/25 tasks                      ⤓ 18 installed  ✘ 1 failed │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Updates (1) <CR> changelog ──────────────────────────────────────────────╮╭ nvim-treesitter ───────────────╮
-│   ↑ nvim-treesitter 0195cd6 feat(jinja)!… · 1 commit behind  △ 1 breaking││state     ✔ loaded              │
+│    ↑ nvim-treesitter 0195cd6 feat(jinja)… · 1 commit behind  △ 1 breaking││state     ✔ loaded              │
 │                                                                          ││tasks     4/4 tasks ✔ 40ms      │
 │ Now (1)                                                                  ││timing    later                 │
 │   plenary.nvim (110ms) now  3/3  tasks ✔  loaded                         ││src       https://github.com/   │
@@ -335,11 +335,11 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
 │   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││   update parser and queries    │
 ╰──────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────╯
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Now 1, Later 4, Triggered 1                                                                  Startup: 83ms │
-╰────────────────────────────────────────────────────── q close · = 50/50 · C check · ^d ^u scroll details ──╯
+│ v to select plugins                                                                          Startup: 83ms │
+╰─── q close · = 50/50 · v select · ⏎ changelog · c/C check · u/U update · i install · l load · d delete ────╯
 ```
 
-**The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3/8`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** has the startup time on the right, `Startup: 83ms`, and on the left the picks of the select view (below), or `v to select plugins` when there is none. The header and the startup time come from `stats.get()`; the counts per timing are in the section headers.
+**The header** has the total on the left, `Total: 6 plugins`, and on its right the work going on now: what kind (installing, updating, checking, building, or a background check for updates), how many of those jobs ended out of all of them, the plugin at it, a bar and a percentage. When nothing runs that side is empty. Below, on the left, are how many plugins loaded and how many did not, `● 3  ○ 3`; in the middle how far all their tasks have got together, `13/25 tasks`, the left numbers of the rows added up over their right numbers, so it counts up in real time; and on the right what the session did so far, each only once there is one: `⤓` plugins cloned, `⚙` builds that ran, `↑` updates that moved a plugin, `✕` plugin directories deleted, `✘` tasks that failed. **The footer** has on the left the picks of the select view, or `v to select plugins` when there is none, and the startup time on the right. On its bottom border, in the middle, are the keys of the list: `q` close, `=` the other view, `v` select, `⏎` changelog, `c`/`C` check, `u`/`U` update, `i` install, `l` load, `d` delete, `^d`/`^u` scroll the details; in the select view, the keys that act on the picks. A footer too narrow for all of them drops keys from the end. The counts per timing are in the section headers.
 
 **The list** has a section per timing, `Now`, `Later` and `Triggered`, each under a header with its count (`Later (18)`) and a blank line before the next; a section with no plugins is left out. Within a section the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. The cursor rests only on rows of plugins: moving onto a header or a blank line takes it on, the way it moved, to the next plugin. The details always show the plugin of the row under the cursor, and nothing when there is none.
 
@@ -349,10 +349,10 @@ When the window opens it looks for updates in the background (see `check` under 
 
 ```
 ╭ Updates (1) ↻ checking… <CR> changelog ───────────────────────────────────────────────────╮╭ nvim-treesitter ──
-│   ↑ nvim-treesitter 0195cd6 feat(jinja)!: update parser and queries · 1 commit behind  △ 1 breaking ││state     ✔ loaded
+│    ↑ nvim-treesitter 0195cd6 feat(jinja)!: update parser and queries · 1 commit behind  △ 1 breaking││state     ✔ loaded
 ```
 
-While the check runs the title says `↻ checking…`. Each plugin that is behind gets a row as its answer comes in: the commit it would move to, the subject of the newest commit, how many commits it is behind, and how many of them break something. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. The rows move with the cursor like the others, and the details show the plugin with an `update` line. `<CR>` switches the details to the plugin's changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. A check that found nothing says `✔ up to date`, and remotes that could not be reached are counted in the title. Without a check the list has no title.
+While the check runs the title says `↻ checking…`. Each plugin that is behind gets a row as its answer comes in: the commit it would move to, the subject of the newest commit, how many commits it is behind, and how many of them break something. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. The arrow sits one cell in from the names of the rows below. The rows move with the cursor like the others, and in the select view (`v`) they have a pick box too: `Space` picks the plugin, here and in its section. The details show the plugin with an `update` line. An `update` that moves a plugin, or finds it where it should be, takes it off the list, so it shows only in its section again; one that leaves it alone, such as for changes of its own, keeps it there. `<CR>` switches the details to the plugin's changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. A check that found nothing says `✔ up to date`, and remotes that could not be reached are counted in the title. Without a check the list has no title.
 
 The check skips a window that opens less than 5 minutes after a check of every plugin finished, and a window that opens while plugins are being installed or updated checks once that run ends. `setup({ ui = { check_on_open = false } })` turns it off; then `C` in the list, or `:Sarcina check`, looks when you ask. Nothing moves until you run `update`.
 

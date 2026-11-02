@@ -68,6 +68,9 @@ function M.stale(resolved)
     return vim.tbl_filter(function(name) return not wanted[name] end, M.installed())
 end
 
+--- How many plugin directories `remove` deleted in this session.
+M.removed = 0
+
 --- Delete the plugin directories `names`: off the runtimepath, then from disk, then out of the install times
 --- and the lock file. Returns the names removed and `{ name, why }` for each that could not be.
 function M.remove(names)
@@ -93,6 +96,8 @@ function M.remove(names)
         require('sarcina.scheduler').forget(name)
     end
     ui.emit('updates')
+    M.removed = M.removed + #removed
+    if #removed > 0 then ui.emit('removed', removed) end
     return removed, failed
 end
 

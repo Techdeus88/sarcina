@@ -93,10 +93,32 @@ function M.configure(opts)
 end
 
 -- The keys the footer names. `=` says which view it switches to.
+-- The keys, for the footer, in the order they are dropped from the end when the footer is too narrow for all.
 local function hint()
-    local other = window().view == 'main' and '50/50' or '70/30'
-    if window().select_mode then return ' v done · Space pick · c u i l d act on picks · ^d ^u scroll ' end
-    return ' q close · = ' .. other .. ' · v select · C check · U update · ^d ^u scroll details '
+    local keys
+    if window().select_mode then
+        keys = { 'v done', '␣ pick', 'c u i l d act on picks', 'q close', '^d/^u scroll' }
+    else
+        keys = {
+            'q close',
+            '= ' .. (window().view == 'main' and '50/50' or '70/30'),
+            'v select',
+            '⏎ changelog',
+            'c/C check',
+            'u/U update',
+            'i install',
+            'l load',
+            'd delete',
+            '^d/^u scroll',
+        }
+    end
+    local width = window().config().footer.width
+    local text = ' ' .. table.concat(keys, ' · ') .. ' '
+    while #keys > 1 and vim.fn.strdisplaywidth(text) > width - 4 do
+        table.remove(keys)
+        text = ' ' .. table.concat(keys, ' · ') .. ' '
+    end
+    return text
 end
 
 -- Draws the details of the selected plugin and names the details window after it. A different plugin
@@ -171,6 +193,9 @@ local function apply_config()
     for _, name in ipairs({ 'header', 'footer' }) do
         if pane_valid(name) then vim.api.nvim_win_set_config(pane_win(name), config[name]) end
     end
+    if pane_valid('footer') then
+        vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'center' })
+    end
     if not config.detail then return close_pane('detail') end
     if pane_valid('detail') then
         vim.api.nvim_win_set_config(pane_win('detail'), config.detail)
@@ -222,7 +247,7 @@ local function refresh_select()
     window().select(vim.api.nvim_win_get_cursor(M._winid)[1])
     window().draw(buffers())
     if pane_valid('footer') then
-        vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'right' })
+        vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'center' })
     end
     follow(false, true)
 end
@@ -242,7 +267,7 @@ end
 function M.toggle_pick()
     local lnum = vim.api.nvim_win_get_cursor(M._winid)[1]
     local entry = window().entry_at(lnum)
-    if not (entry and entry.kind == 'plugin') then return end
+    if not (entry and entry.name) then return end
     window().select(lnum)
     window().toggle_mark(entry.name)
     refresh_select()
@@ -340,7 +365,7 @@ local function open_window(enter)
     vim.wo[M._winid].wrap = false
     vim.wo[M._winid].cursorline = true
     open_pane('header', config.header)
-    open_pane('footer', config.footer, { footer = hint(), footer_pos = 'right' })
+    open_pane('footer', config.footer, { footer = hint(), footer_pos = 'center' })
     if config.detail then open_detail(config.detail) end
     vim.api.nvim_create_autocmd('WinClosed', {
         pattern = tostring(M._winid),
@@ -396,6 +421,12 @@ end
 
 -- A job changed: its plugin's row needs a redraw, and real work or a failure may open the window.
 function M._on_task(job)
+    -- A plugin an update moved, or found where it should be, leaves the Updates list for its section.
+    local checker = package.loaded['sarcina.checker']
+    if checker and job.id == 'update' and job.status == 'done' then
+        local note = job.note or ''
+        if note == 'up to date' or note:find('→', 1, true) then checker.settled(job.plugin) end
+    end
     M._dirty[job.plugin] = true
     if job.working or job.status == 'failed' then M._want = true end
     schedule_flush()
@@ -443,7 +474,7 @@ function M.emit(event, payload)
         M._on_start(payload)
     elseif event == 'done' then
         M._on_done(payload)
-    elseif event == 'updates' then
+    elseif event == 'updates' or event == 'removed' then
         M._full = true
         schedule_flush()
     end
@@ -512,7 +543,7 @@ function M.toggle_view()
     window().draw(buffers())
     apply_config()
     if pane_valid('footer') then
-        vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'right' })
+        vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'center' })
     end
     follow(false, true)
 end

@@ -125,7 +125,8 @@ test('a running row shows its work, and the details show its output, until it is
         h.ok(vim.wait(500, win_open), 'the window never opened')
         h.ok(vim.wait(500, function() return lines()[1]:find('installing', 1, true) end), lines()[1])
         h.ok(lines()[1]:find('^   slow%s+.*later%s+.*1/2%s+tasks ▶.*installing'), lines()[1])
-        h.eq(header_text(), ' Total: 1 plugin')
+        -- The right of the header follows the work: what kind, how far, the plugin at it, and a bar.
+        h.ok(header_text():find('^ Total: 1 plugin%s+⤓ Installing 0/1 · slow  .-   0%% $'), header_text())
         h.ok(
             vim.wait(500, function() return details_text():find('Receiving objects: 45%', 1, true) end),
             details_text()
@@ -136,6 +137,8 @@ test('a running row shows its work, and the details show its output, until it is
         h.ok(vim.wait(500, function() return lines()[1]:find('loaded', 1, true) end), lines()[1])
         h.ok(lines()[1]:find('^   slow%s+.*later%s+.*2/2%s+tasks ✔.*loaded'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
+        -- Idle, the right of the second line says what the session did.
+        h.ok(header_all()[2]:find('⤓ 1 installed $'), header_all()[2])
     end)
 end)
 
@@ -527,9 +530,11 @@ test('below the total the header shows how far all the tasks have got, centered'
         local got = header_all()
         h.eq(#got, 2)
         h.eq(got[1], ' Total: 3 plugins')
-        h.eq(vim.trim(got[2]), '4/6 tasks')
+        -- Loaded and not loaded on the left, the tasks in the middle, nothing done on the right.
+        h.ok(got[2]:find('^ ● 2  ○ 1%s+4/6 tasks$'), got[2])
         local width = vim.api.nvim_win_get_config(ui._header_winid).width
-        h.eq(#got[2]:match('^ *'), math.floor((width - #'4/6 tasks') / 2))
+        local at = got[2]:find('4/6 tasks', 1, true)
+        h.eq(vim.fn.strdisplaywidth(got[2]:sub(1, at - 1)), math.floor((width - #'4/6 tasks') / 2))
         local ns = vim.api.nvim_get_namespaces().sarcina_window
         local marks = vim.api.nvim_buf_get_extmarks(
             ui._header_bufnr,
@@ -538,10 +543,52 @@ test('below the total the header shows how far all the tasks have got, centered'
             { 1, -1 },
             { details = true }
         )
+        h.eq(vim.tbl_map(function(mark) return mark[4].hl_group end, marks), {
+            'SarcinaDone',
+            'SarcinaStepTime',
+            'SarcinaPending',
+            'SarcinaStepTime',
+            'SarcinaStepTime',
+            'SarcinaNote',
+        })
+    end)
+end)
+
+test('the footer names every key in its middle, and drops keys from the end when it is narrow', function()
+    h.register({ loaded('a') })
+    local function hint_text()
+        local footer_text = vim.api.nvim_win_get_config(ui._footer_winid).footer
+        return type(footer_text) == 'table' and footer_text[1][1] or footer_text
+    end
+    with_size(200, 50, function()
+        ui.open()
+        h.eq(vim.api.nvim_win_get_config(ui._footer_winid).footer_pos, 'center')
         h.eq(
-            vim.tbl_map(function(mark) return mark[4].hl_group end, marks),
-            { 'SarcinaStepTime', 'SarcinaNote' }
+            hint_text(),
+            ' q close · = 50/50 · v select · ⏎ changelog · c/C check · u/U update · i install · l load · d delete · ^d/^u scroll '
         )
+        vim.api.nvim_set_current_win(ui._winid)
+        vim.api.nvim_feedkeys('v', 'xt', false)
+        h.eq(hint_text(), ' v done · ␣ pick · c u i l d act on picks · q close · ^d/^u scroll ')
+        vim.api.nvim_feedkeys('v', 'xt', false)
+    end)
+    with_size(100, 40, function()
+        ui.open()
+        local width = vim.api.nvim_win_get_config(ui._footer_winid).width
+        h.ok(vim.fn.strdisplaywidth(hint_text()) <= width - 4, hint_text())
+        h.ok(vim.startswith(hint_text(), ' q close · = 50/50 · v select'), hint_text())
+        h.ok(not hint_text():find('scroll', 1, true), hint_text())
+    end)
+end)
+
+test('the header counts what the session deleted', function()
+    h.register({ loaded('a') })
+    vim.fn.mkdir(paths.install('gone-a'), 'p')
+    vim.fn.mkdir(paths.install('gone-b'), 'p')
+    with_size(200, 50, function()
+        ui.open()
+        require('sarcina.installer').remove({ 'gone-a', 'gone-b' })
+        h.ok(vim.wait(500, function() return header_all()[2]:find('✕ 2 deleted $') end), header_all()[2])
     end)
 end)
 
@@ -555,10 +602,16 @@ test('the total grows as the tasks of the plugins finish, up to all of them', fu
     with_size(200, 50, function()
         h.ok(vim.wait(500, win_open), 'the window never opened')
         -- b is done (1 of 1) and a is at its first task (1 of 2).
-        h.ok(vim.wait(500, function() return vim.trim(header_all()[2]) == '2/3 tasks' end), header_all()[2])
+        h.ok(
+            vim.wait(500, function() return header_all()[2]:find(' 2/3 tasks', 1, true) end),
+            header_all()[2]
+        )
         release()
         h.ok(tasks.wait(2000))
-        h.ok(vim.wait(500, function() return vim.trim(header_all()[2]) == '3/3 tasks' end), header_all()[2])
+        h.ok(
+            vim.wait(500, function() return header_all()[2]:find(' 3/3 tasks', 1, true) end),
+            header_all()[2]
+        )
     end)
 end)
 
@@ -1000,6 +1053,7 @@ test(
     'the cursor rests only on rows of plugins, going on the way it moved past headers and blank lines',
     function()
         h.register({ { name = 'n1', timing = 'now' }, loaded('l1'), loaded('l2') })
+        vim.o.columns, vim.o.lines = 200, 50
         ui.open()
         vim.api.nvim_set_current_win(ui._winid)
         -- 1 Now, 2 n1, 3 blank, 4 Later, 5 l1, 6 l2
@@ -1019,6 +1073,7 @@ test(
 
 test('a line with no plugin shows no details', function()
     h.register({ loaded('a') })
+    vim.o.columns, vim.o.lines = 200, 50
     ui.open()
     window.select(1) -- the Later header
     h.eq(window.selected(), nil)

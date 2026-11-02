@@ -380,13 +380,15 @@ end
 -- A row of the Updates section: `↑ name commit subject · N commits behind  △ N breaking`. The subject of the
 -- newest commit takes what is left of the list, and goes when that is too little to say anything.
 local function update_line(name, info)
-    local head = {
-        { INDENT },
+    -- The arrow sits one cell in from the names of the rows below, and in the select view behind the pick box.
+    local head = lead_parts(name)
+    vim.list_extend(head, {
+        { ' ' },
         { '↑ ', 'SarcinaUpdate' },
         { name, 'SarcinaName' },
         { ' ' },
         { short(info.to), 'SarcinaRev' },
-    }
+    })
     local tail = behind(info)
     local newest = info.commits and info.commits[1]
     local room = view.list_w - parts_width(head) - parts_width(tail) - 1
@@ -450,21 +452,131 @@ local function layout(list)
     return lines
 end
 
+-- One line of `width`: `left` at the start, `center` in the middle and `right` at the end. The center moves over
+-- for a long left, and a right with no room after what is before it is left out.
+local function spread(width, left, center, right)
+    local parts = vim.list_extend({}, left)
+    local used = parts_width(left)
+    if center then
+        local at = math.max(math.floor((width - parts_width(center)) / 2), used > 0 and used + 1 or 0)
+        table.insert(parts, { string.rep(' ', at - used) })
+        vim.list_extend(parts, center)
+        used = at + parts_width(center)
+    end
+    if right and #right > 0 then
+        local at = width - parts_width(right)
+        if at > used then
+            table.insert(parts, { string.rep(' ', at - used) })
+            vim.list_extend(parts, right)
+        end
+    end
+    return build_line(parts)
+end
+
+-- The kinds of work the header follows as it happens, in the order it looks for them.
+local ACTIVITY = {
+    { id = 'install', icon = '⤓', label = 'Installing' },
+    { id = 'update', icon = '↑', label = 'Updating' },
+    { id = 'check', icon = '↻', label = 'Checking' },
+    { id = 'build', icon = '⚙', label = 'Building' },
+}
+local BAR_W = 10
+
+-- The work going on now, for the right of the header: what kind, how many of those jobs ended out of all of them,
+-- the plugin at it, a bar and how far along. A background check for updates counts too. Nothing when idle.
+local function activity_parts()
+    local kind, finished, total, current
+    local jobs = require('sarcina.tasks').snapshot().jobs
+    for _, candidate in ipairs(ACTIVITY) do
+        local ended, all, running = 0, 0, nil
+        for _, job in ipairs(jobs) do
+            if job.id == candidate.id and job.status ~= 'skipped' then
+                all = all + 1
+                if job.status == 'done' or job.status == 'failed' then ended = ended + 1 end
+                if job.status == 'running' then running = job.plugin end
+            end
+        end
+        if running then
+            kind, finished, total, current = candidate, ended, all, running
+            break
+        end
+    end
+    if not kind then
+        local check = checker().state()
+        if not check.running then return {} end
+        kind, finished, total = { icon = '↻', label = 'Checking for updates' }, check.checked, check.total
+    end
+    local share = total > 0 and finished / total or 0
+    local filled = math.floor(share * BAR_W + 0.5)
+    local parts = {
+        { kind.icon .. ' ' .. kind.label .. ' ', 'SarcinaRunning' },
+        { string.format('%d/%d', finished, total), 'SarcinaStepTime' },
+    }
+    if current then table.insert(parts, { ' · ' .. current, 'SarcinaName' }) end
+    vim.list_extend(parts, {
+        { '  ' },
+        { string.rep('█', filled), 'SarcinaRunning' },
+        { string.rep('░', BAR_W - filled), 'SarcinaNote' },
+        { string.format(' %3d%% ', math.floor(share * 100 + 0.5)), 'SarcinaNote' },
+    })
+    return parts
+end
+
+-- What the session did so far, for the right of the header: clones, builds that ran, updates that moved a plugin,
+-- deletes and failures, each only when there was one.
+local function totals_parts()
+    local count = { install = 0, build = 0, update = 0, failed = 0 }
+    for _, job in ipairs(require('sarcina.track').history()) do
+        if job.status == 'failed' then
+            count.failed = count.failed + 1
+        elseif job.status == 'done' then
+            if (job.id == 'install' or job.id == 'build') and job.working then
+                count[job.id] = count[job.id] + 1
+            elseif job.id == 'update' and (job.note or ''):find('→', 1, true) then
+                count.update = count.update + 1
+            end
+        end
+    end
+    local parts = {}
+    for _, total in ipairs({
+        { count.install, '⤓', 'installed', 'SarcinaDone' },
+        { count.build, '⚙', 'built', 'SarcinaStepBuild' },
+        { count.update, '↑', 'updated', 'SarcinaUpdate' },
+        { require('sarcina.installer').removed, '✕', 'deleted', 'SarcinaNote' },
+        { count.failed, '✘', 'failed', 'SarcinaFailed' },
+    }) do
+        if total[1] > 0 then
+            if #parts > 0 then table.insert(parts, { '  ' }) end
+            table.insert(parts, { total[2] .. ' ' .. total[1], total[4] })
+            table.insert(parts, { ' ' .. total[3], 'SarcinaNote' })
+        end
+    end
+    if #parts > 0 then table.insert(parts, { ' ' }) end
+    return parts
+end
+
+-- The header: the total and the work going on now, then how many plugins loaded and did not, how far all their
+-- tasks have got in the middle, and what the session did.
 local function header_lines()
     local text = string.format(' Total: %d plugin%s', #names, #names == 1 and '' or 's')
-    local task, tasks = 0, 0
+    local task, tasks, loaded = 0, 0, 0
     for _, name in ipairs(names) do
         task, tasks = task + rows[name].task, tasks + rows[name].tasks
+        if rows[name].state == 'loaded' then loaded = loaded + 1 end
     end
-    local count = string.format('%d/%d tasks', task, tasks)
-    local lead = math.max(math.floor((view.full_w - width_of(count)) / 2), 0)
+    local counts = {
+        { ' ' },
+        { '●', 'SarcinaDone' },
+        { ' ' .. loaded, 'SarcinaStepTime' },
+        { '  ' },
+        { '○', 'SarcinaPending' },
+        { ' ' .. (#names - loaded), 'SarcinaStepTime' },
+    }
+    local progress =
+        { { tostring(task), 'SarcinaStepTime' }, { string.format('/%d tasks', tasks), 'SarcinaNote' } }
     return {
-        build_line({ { fit(text, view.full_w), 'SarcinaHeader' } }),
-        build_line({
-            { string.rep(' ', lead) },
-            { tostring(task), 'SarcinaStepTime' },
-            { string.format('/%d tasks', tasks), 'SarcinaNote' },
-        }),
+        spread(view.full_w, { { text, 'SarcinaHeader' } }, nil, activity_parts()),
+        spread(view.full_w, counts, progress, totals_parts()),
     }
 end
 

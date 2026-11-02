@@ -187,7 +187,7 @@ test('while a check runs the list title says checking, and then the list starts 
     local lines = buffer_lines()
     h.eq(
         lines[1],
-        '   ↑ upd.nvim ' .. h.head(remote):sub(1, 7) .. ' feat: two · 3 commits behind  △ 2 breaking'
+        '    ↑ upd.nvim ' .. h.head(remote):sub(1, 7) .. ' feat: two · 3 commits behind  △ 2 breaking'
     )
     h.eq(lines[2], '')
     h.eq(lines[3], ' Later (2)')
@@ -300,5 +300,52 @@ test(':Sarcina check lists the updates in the window and says which plugins have
     )
     h.eq(tasks.snapshot().total, 0) -- the task list is left alone
 end)
+
+test('in the select view an update row has a pick box, and Space picks its plugin', function()
+    local remote = behind_by_three('pick.nvim')
+    h.register({ spec('pick.nvim', remote), { name = 'other' } })
+    ui.open()
+    check()
+    ui._flush()
+    vim.api.nvim_set_current_win(ui._winid)
+    local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
+    press('v')
+    h.ok(buffer_lines()[1]:find('^ ○  ↑ pick%.nvim'), buffer_lines()[1])
+    vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
+    press('<Space>')
+    h.eq(window.marked(), { 'pick.nvim' })
+    h.ok(buffer_lines()[1]:find('^ ✔  ↑ pick%.nvim'), buffer_lines()[1])
+    -- The same plugin is picked in its section too.
+    local row = buffer_lines()[window.line('pick.nvim')]
+    h.ok(row:find('^ ✔ pick%.nvim'), row)
+    press('v')
+end)
+
+test(
+    'an update that moved a plugin takes it off the Updates list, and one that left it alone does not',
+    function()
+        local moved = behind_by_three('moved.nvim')
+        local kept, kept_dir = behind_by_three('kept.nvim')
+        vim.fn.writefile({ 'a change of my own' }, kept_dir .. '/tracked.txt')
+        local resolved = {
+            { name = 'moved.nvim', timing = 'later', spec = spec('moved.nvim', moved) },
+            { name = 'kept.nvim', timing = 'later', spec = spec('kept.nvim', kept) },
+        }
+        h.register(vim.tbl_map(function(e) return e.spec end, resolved))
+        ui.open()
+        check()
+        h.eq(vim.tbl_count(checker.state().updates), 2)
+        updater.update(resolved, {})
+        h.ok(tasks.wait(15000), 'the update did not finish')
+        h.ok(
+            vim.wait(1000, function() return checker.update_of('moved.nvim') == nil end),
+            'the moved plugin is still listed'
+        )
+        h.ok(checker.update_of('kept.nvim'), 'a plugin left alone lost its update')
+        ui._flush()
+        local text = table.concat(buffer_lines(), '\n')
+        h.ok(not text:find('↑ moved', 1, true) and text:find('↑ kept', 1, true), text)
+    end
+)
 
 return tests

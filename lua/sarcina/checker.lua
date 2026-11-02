@@ -88,6 +88,13 @@ function M.run(entries, on_done, opts)
     pump()
 end
 
+--- `name` was updated: it has no update any more, and the window lists it in its section only.
+function M.settled(name)
+    if state.updates[name] == nil then return end
+    state.updates[name] = nil
+    ui.emit('updates', state)
+end
+
 --- Forget what was found. For tests.
 function M._reset()
     state = { running = false, checked = 0, total = 0, updates = {}, failed = {}, finished = nil }

@@ -6,6 +6,7 @@ local M = {}
 M.notes = {}
 
 local registered = {}
+local size -- the editor's columns and lines before the first test, which every test starts from
 
 --- Point every XDG dir at a throwaway root and capture vim.notify.
 function M.setup_env()
@@ -19,6 +20,8 @@ end
 
 --- Clear task, UI and notification state between tests.
 function M.reset()
+    size = size or { vim.o.columns, vim.o.lines }
+    vim.o.columns, vim.o.lines = size[1], size[2]
     M.notes = {}
     registered = {}
     local tasks = require('sarcina.tasks')
@@ -49,6 +52,7 @@ function M.reset()
     ui.check_on_open = false
     ui._check_after_run = false
     require('sarcina.checker')._reset()
+    require('sarcina.installer').removed = 0
     require('sarcina.window').changelog = false
     ui.close_delay = 60000
 end
