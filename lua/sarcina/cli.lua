@@ -9,7 +9,7 @@ local resolver = require('sarcina.resolver')
 local ui = require('sarcina.ui')
 
 local SUBCOMMANDS =
-    { 'add', 'delete', 'install', 'load', 'sync', 'clean', 'check', 'update', 'stats', 'panel', 'help' }
+    { 'add', 'delete', 'install', 'load', 'sync', 'clean', 'check', 'update', 'stats', 'panel', 'log', 'help' }
 
 local subcommands = {}
 
@@ -132,6 +132,14 @@ function subcommands.stats(_)
 end
 
 function subcommands.panel(_) ui.toggle() end
+
+-- Opens the log in a split at the end, where the newest lines are.
+function subcommands.log(_)
+    local path = require('sarcina.log').path()
+    if not vim.uv.fs_stat(path) then return ui.emit('info', 'The log is empty') end
+    vim.cmd('botright split ' .. vim.fn.fnameescape(path))
+    vim.cmd('normal! G')
+end
 
 function subcommands.help(_) ui.emit('info', 'Subcommands: ' .. table.concat(SUBCOMMANDS, ', ')) end
 

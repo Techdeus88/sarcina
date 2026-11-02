@@ -254,6 +254,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | `:Sarcina delete <plugins>` | ask, then delete the named plugins from the plugins directory. One name or several |
 | `:Sarcina clean` | list the plugin directories that are not in your specs |
 | `:Sarcina clean!` | delete them (`:Sarcina! clean` does the same) |
+| `:Sarcina log` | open the log of messages in a split |
 | `:Sarcina panel` | toggle the window, and go into it |
 | `:Sarcina stats` | print the stats on one line |
 | `:Sarcina help` | list subcommands |
@@ -318,7 +319,7 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Total: 6 plugins                                      ⤓ Installing 18/48 · telescope.nvim  ████░░░░░░  37% │
+│ Total: 6 plugins                                 Sarcina               ⤓ Installing 18/48  ████░░░░░░  37% │
 │ ● 3  ○ 3                                       13/25 tasks                      ⤓ 18 installed  ✘ 1 failed │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Updates (1) <CR> changelog ──────────────────────────────────────────────╮╭ nvim-treesitter ───────────────╮
@@ -403,7 +404,7 @@ Sarcina never uses `vim.notify`, the command line or a prompt. A line of work be
 - **Line 2** is the last message: what a command says (`› Deleted 2: a, b`, `! Not installed: x`, `✘ 1 failed`), shown until the next one or for 8 s (24 s for an error). A message opens the window if it is closed, and the window closes again with it when nothing else keeps it open. The end-of-run count (`› 12 done`) is shown only if the window is open already.
 - **Questions** (`update`, `delete`) take both lines: `? Delete 2 plugins: a, b?` and under it the note and `[y] yes  [n] no`. The window opens and takes focus for it. `y` answers yes; `n`, `<Esc>` or closing the window answer no. `confirm = false` skips them.
 
-The left of the header counts the session as icon and number: `● 12` loaded, `○ 3` not loaded, then `⤓` installed, `⚙` built, `↑` updated, `✕` deleted and `✘` failed, each once there was one. `ui.messages()` returns every message of the session as `{ msg, level }`, and `ui.on('info' | 'warn' | 'error', fn)` listens to them. The resolver's chatter, such as derived plugin names, goes out as `debug` events that only `ui.on('debug', fn)` listeners receive.
+The left of the header counts the session as icon and number: `● 12` loaded, `○ 3` not loaded, then `⤓` installed, `⚙` built, `↑` updated, `✕` deleted and `✘` failed, each once there was one. Every message and debug line is also written to `stdpath('state')/sarcina/sarcina.log` (rotated once past 512 KB), and `:Sarcina log` opens it. `ui.messages()` returns every message of the session as `{ msg, level }`, and `ui.on('info' | 'warn' | 'error', fn)` listens to them. The resolver's chatter, such as derived plugin names, goes out as `debug` events that only `ui.on('debug', fn)` listeners receive.
 
 ## Development
 

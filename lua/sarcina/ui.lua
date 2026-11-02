@@ -499,6 +499,7 @@ end
 -- the window like real work does. With `show = 'never'` it is only kept (see `messages`).
 function M._on_message(level, text, passive)
     local message = { level = level, text = text }
+    require('sarcina.log').write(level, text)
     table.insert(M._messages, { msg = text, level = level })
     window().message = message
     M._want = M._want or not passive
@@ -562,6 +563,7 @@ function M.emit(event, payload)
         M._full = true
         schedule_flush()
     end
+    if event == 'debug' then require('sarcina.log').write(vim.log.levels.DEBUG, tostring(payload)) end
     for _, fn in ipairs(M._listeners) do
         pcall(fn, event, payload)
     end

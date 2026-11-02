@@ -126,7 +126,10 @@ test('a running row shows its work, and the details show its output, until it is
         h.ok(vim.wait(500, function() return lines()[1]:find('installing', 1, true) end), lines()[1])
         h.ok(lines()[1]:find('^   slow%s+.*later%s+.*1/2%s+tasks ▶.*installing'), lines()[1])
         -- The right of the header follows the work: what kind, how far, the plugin at it, and a bar.
-        h.ok(header_text():find('^ Total: 1 plugin%s+⤓ Installing 0/1 · slow  .-   0%% $'), header_text())
+        h.ok(
+            header_text():find('^ Total: 1 plugin%s+Sarcina%s+⤓ Installing 0/1 · slow  .-   0%% $'),
+            header_text()
+        )
         h.ok(
             vim.wait(500, function() return details_text():find('Receiving objects: 45%', 1, true) end),
             details_text()
@@ -136,7 +139,7 @@ test('a running row shows its work, and the details show its output, until it is
         h.ok(tasks.wait(2000))
         h.ok(vim.wait(500, function() return lines()[1]:find('loaded', 1, true) end), lines()[1])
         h.ok(lines()[1]:find('^   slow%s+.*later%s+.*2/2%s+tasks ✔.*loaded'), lines()[1])
-        h.eq(header_text(), ' Total: 1 plugin')
+        h.ok(header_text():find('^ Total: 1 plugin%s+Sarcina$'), header_text())
         -- The counts of what the session did sit on the left, after loaded and not loaded.
         h.ok(header_all()[2]:find('^ ● 1  ○ 0  ⤓ 1'), header_all()[2])
     end)
@@ -154,7 +157,7 @@ test(
         h.run(plugins)
         with_size(200, 50, function()
             ui.open()
-            h.eq(header_text(), ' Total: 3 plugins')
+            h.ok(header_text():find('^ Total: 3 plugins%s+Sarcina$'), header_text())
             local got = footer()
             h.eq(#got, 1)
             h.ok(vim.startswith(got[1], ' v to select plugins'), got[1])
@@ -572,10 +575,15 @@ test('below the total the header shows how far all the tasks have got, centered'
         ui.open()
         local got = header_all()
         h.eq(#got, 2)
-        h.eq(got[1], ' Total: 3 plugins')
+        h.ok(got[1]:find('^ Total: 3 plugins%s+Sarcina$'), got[1])
+        -- The name sits in the middle of the first line.
+        local width = vim.api.nvim_win_get_config(ui._header_winid).width
+        h.eq(
+            vim.fn.strdisplaywidth(got[1]:sub(1, got[1]:find('Sarcina', 1, true) - 1)),
+            math.floor((width - 7) / 2)
+        )
         -- Loaded and not loaded on the left, the tasks in the middle.
         h.ok(got[2]:find('^ ● 2  ○ 1%s+4/6 tasks'), got[2])
-        local width = vim.api.nvim_win_get_config(ui._header_winid).width
         local at = got[2]:find('4/6 tasks', 1, true)
         h.eq(vim.fn.strdisplaywidth(got[2]:sub(1, at - 1)), math.floor((width - #'4/6 tasks') / 2))
         local ns = vim.api.nvim_get_namespaces().sarcina_window
@@ -638,6 +646,25 @@ test('the header counts what the session deleted', function()
         )
     end)
 end)
+
+test(
+    'on a narrow header the work in progress drops the plugin name before it would run into Sarcina',
+    function()
+        local held = { name = 'slow', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
+        h.register({ held })
+        tasks.enqueue('slow', held)
+        tasks.run_all()
+        with_size(110, 40, function()
+            h.ok(vim.wait(500, win_open), 'the window never opened')
+            ui.open()
+            local first = header_text()
+            h.ok(first:find('Sarcina%s+⤓ Installing 0/1  .-   0%% $'), first)
+            h.ok(not first:find('· slow', 1, true), first)
+        end)
+        release()
+        h.ok(tasks.wait(2000))
+    end
+)
 
 test('the total grows as the tasks of the plugins finish, up to all of them', function()
     local held = { name = 'a', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
@@ -1332,9 +1359,15 @@ test('a message shows in the right of the header, opens the window, and is never
         ui.emit('warn', 'Not installed: ghost.nvim')
         h.ok(vim.wait(500, function() return ui._header_winid ~= nil end), 'the window did not open')
         local function second() return header_all()[2] end
-        h.ok(vim.wait(500, function() return second():find('! Not installed: ghost.nvim', 1, true) end), second())
+        h.ok(
+            vim.wait(500, function() return second():find('! Not installed: ghost.nvim', 1, true) end),
+            second()
+        )
         ui.emit('info', 'Everything is up to date')
-        h.ok(vim.wait(500, function() return second():find('› Everything is up to date', 1, true) end), second())
+        h.ok(
+            vim.wait(500, function() return second():find('› Everything is up to date', 1, true) end),
+            second()
+        )
     end)
     h.eq(h.stray, {})
     h.ok(h.notified('Not installed: ghost.nvim'))

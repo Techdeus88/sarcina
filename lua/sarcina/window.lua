@@ -504,8 +504,9 @@ local ACTIVITY = {
 local BAR_W = 10
 
 -- The work going on now, for the right of the header: what kind, how many of those jobs ended out of all of them,
--- the plugin at it, a bar and how far along. A background check for updates counts too. Nothing when idle.
-local function activity_parts()
+-- the plugin at it, a bar and how far along, within `room` columns. A background check for updates counts too.
+-- Nothing when idle.
+local function activity_parts(room)
     local kind, finished, total, current
     local jobs = require('sarcina.tasks').snapshot().jobs
     for _, candidate in ipairs(ACTIVITY) do
@@ -529,18 +530,26 @@ local function activity_parts()
     end
     local share = total > 0 and finished / total or 0
     local filled = math.floor(share * BAR_W + 0.5)
-    local parts = {
+    local head = {
         { kind.icon .. ' ' .. kind.label .. ' ', 'SarcinaRunning' },
         { string.format('%d/%d', finished, total), 'SarcinaStepTime' },
     }
-    if current then table.insert(parts, { ' · ' .. current, 'SarcinaName' }) end
-    vim.list_extend(parts, {
+    local name = current and { { ' · ' .. current, 'SarcinaName' } } or {}
+    local bar = {
         { '  ' },
         { string.rep('█', filled), 'SarcinaRunning' },
         { string.rep('░', BAR_W - filled), 'SarcinaNote' },
-        { string.format(' %3d%% ', math.floor(share * 100 + 0.5)), 'SarcinaNote' },
-    })
-    return parts
+    }
+    local percent = { { string.format(' %3d%% ', math.floor(share * 100 + 0.5)), 'SarcinaNote' } }
+    -- With little room the name of the plugin goes first, then the bar.
+    for _, pieces in ipairs({ { head, name, bar, percent }, { head, bar, percent }, { head, percent } }) do
+        local parts = {}
+        for _, piece in ipairs(pieces) do
+            vim.list_extend(parts, piece)
+        end
+        if not room or parts_width(parts) <= room then return parts end
+    end
+    return {}
 end
 
 -- What the session did so far, for the left of the header next to the loaded and not loaded counts: an icon and
@@ -606,7 +615,7 @@ local function right_side(used_first, used_second)
         return right_text('?', head, 'SarcinaWaiting', room_first),
             right_text('', second, 'SarcinaWaiting', room_second)
     end
-    local first = activity_parts()
+    local first = activity_parts(room_first)
     local second = {}
     local message = M.message
     if message then

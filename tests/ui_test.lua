@@ -140,7 +140,7 @@ test('a dismissed window ignores a clean appended run but reopens for a new fail
     h.eq(win_open(), false)
     append_run({ failing('c') })
     h.ok(vim.wait(300, win_open), 'a new failure did not reopen the window')
-    h.eq(header(), ' Total: 3 plugins')
+    h.ok(header():find('^ Total: 3 plugins%s+Sarcina'), header())
     local failed = 0
     for _, line in ipairs(lines()) do
         if line:find('✘', 1, true) then failed = failed + 1 end
@@ -261,6 +261,33 @@ test('the end-of-run summary reports failures at error level', function()
     local last = h.notes[#h.notes]
     h.eq(last.msg, '0 done, 1 failed')
     h.eq(last.level, vim.log.levels.ERROR)
+end)
+
+test('every message and debug line goes to the log file, one line each', function()
+    local log = require('sarcina.log')
+    vim.fn.delete(log.path())
+    log._reset()
+    ui.emit('warn', 'Not installed: ghost.nvim')
+    ui.emit('error', 'two\nlines')
+    ui.emit('debug', 'derived a name')
+    local got = vim.fn.readfile(log.path())
+    h.eq(#got, 3)
+    h.ok(got[1]:find('^%d%d%d%d%-%d%d%-%d%d %d%d:%d%d:%d%d WARN  Not installed: ghost.nvim$'), got[1])
+    h.ok(got[2]:find('ERROR two | lines$'), got[2])
+    h.ok(got[3]:find('DEBUG derived a name$'), got[3])
+    h.eq(h.stray, {})
+end)
+
+test(':Sarcina log opens the log file, and says so when there is none', function()
+    local log = require('sarcina.log')
+    vim.fn.delete(log.path())
+    vim.cmd('runtime plugin/sarcina.lua')
+    vim.cmd('Sarcina log')
+    h.ok(h.notified('The log is empty'), vim.inspect(h.notes))
+    ui.emit('info', 'something happened')
+    vim.cmd('Sarcina log')
+    h.eq(vim.uv.fs_realpath(vim.fn.expand('%:p')), vim.uv.fs_realpath(log.path()))
+    vim.cmd('close')
 end)
 
 return tests
