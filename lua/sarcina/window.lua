@@ -83,7 +83,10 @@ local STEP_GROUP = {
     check = 'SarcinaStepCheck',
 }
 
-local NAME_MAX, NAME_MIN, TAG_W, STATE_W, TIME_W = 28, 10, 7, 10, 6
+local NAME_MAX, NAME_MIN, TAG_W = 28, 10, 7
+-- The load time sits in brackets after the name: `(0.6ms)` at most `(<0.1ms)`. The status message is what is
+-- left of the list after the other columns, up to MESSAGE_W.
+local TIME_COL, MESSAGE_W = 8, 24
 local KEY_W = 9
 -- The window takes 80% of the editor each way: a header across the top, a footer across the bottom, and
 -- between them the list and the details, which scroll. The list gets at most 55% of the width, and the
@@ -108,9 +111,8 @@ local view = {
     list_w = 0, -- inner width of the list
     detail_w = 0, -- inner width of the details, nil when there is no details pane
     name_w = 0,
-    progress_w = 0,
-    show_state = true,
-    detail = 0, -- columns left for a row's detail text
+    digits = 1, -- digits of the largest task count, so that every widget is as wide as the others
+    message = 0, -- columns left for the status message of a row
 }
 
 -- The header is two lines and the footer one, each with two borders.
@@ -204,14 +206,19 @@ local function format_time(ms)
     return string.format('%.1fs', ms / 1000)
 end
 
--- The tasks widget as `{ text, group }` parts: the count, then the label, with a check once every task of
--- the plugin is done, and rounded ends unless `rounded` is off.
+-- The tasks widget as `{ text, group }` parts: the count (`3/8`), then the label with the icon of the state,
+-- and rounded ends unless `rounded` is off. A loaded plugin has a check, one that waits for its trigger a
+-- circle, one at work a triangle, and so on.
 local function pill_parts(task, tasks, state)
     local kind = 'SarcinaPill' .. PILL[state]
+    local digits = view.digits
     local parts = {}
     if M.rounded then table.insert(parts, { CAP_LEFT, kind .. 'Left' }) end
-    table.insert(parts, { string.format(' %d of %d ', task, tasks), kind .. 'Count' })
-    table.insert(parts, { state == 'loaded' and ' tasks ✔ ' or ' tasks ', kind })
+    table.insert(
+        parts,
+        { string.format(' %' .. digits .. 'd/%' .. digits .. 'd ', task, tasks), kind .. 'Count' }
+    )
+    table.insert(parts, { ' tasks ' .. GLYPH[state] .. ' ', kind })
     if M.rounded then table.insert(parts, { CAP_RIGHT, kind .. 'Right' }) end
     return parts
 end
@@ -252,40 +259,34 @@ local function build_line(parts)
     return { text = table.concat(text), marks = marks }
 end
 
+-- What the row says about the state: its word, and what it adds, such as git's line or the error.
+local function status_message(row)
+    local detail = ((row.detail or ''):gsub('%s+', ' '))
+    if detail == '' then return row.state end
+    if vim.startswith(detail, row.state) then return detail end
+    return row.state .. ' · ' .. detail
+end
+
+-- A row: `name  (load time) when it loads, <done>/<all> tasks pill, status message`.
 local function row_line(row)
-    local group = HL[row.state]
     local time = format_time(row.duration)
     local parts = {
         { ' ' },
-        { GLYPH[row.state], group },
-        { ' ' },
         { pad(fit(row.name, view.name_w), view.name_w), 'SarcinaName' },
+        { '  ' },
+        { pad(time ~= '' and '(' .. time .. ')' or '', TIME_COL), 'SarcinaNote' },
         { ' ' },
         { pad(row.timing or '', TAG_W), 'SarcinaTag' },
+        { ' ' },
     }
-    if view.show_state then
+    vim.list_extend(parts, pill_parts(row.task, row.tasks, row.state))
+    if view.message > 0 then
         table.insert(parts, { ' ' })
-        table.insert(parts, { pad(row.state, STATE_W), group })
-    end
-    table.insert(parts, { ' ' })
-    local pill = pill_parts(row.task, row.tasks, row.state)
-    vim.list_extend(parts, pill)
-    table.insert(parts, { string.rep(' ', view.progress_w - parts_width(pill)) })
-    table.insert(parts, { ' ' })
-    table.insert(parts, { string.rep(' ', TIME_W - width_of(time)) .. time, 'SarcinaNote' })
-    if view.detail > 0 then
-        local detail = (row.detail or ''):gsub('%s+', ' ')
-        table.insert(parts, { ' ' })
-        table.insert(
-            parts,
-            { fit(detail, view.detail), row.state == 'failed' and 'SarcinaFailed' or 'SarcinaNote' }
-        )
+        table.insert(parts, { fit(status_message(row), view.message), HL[row.state] })
     end
     return build_line(parts)
 end
 
--- How many plugins there are, and below it, centered, how far all their tasks have got together: the left
--- numbers of the rows added up over the right ones, so it grows as the rows do.
 local function header_lines()
     local text = string.format(' Total: %d plugin%s', #names, #names == 1 and '' or 's')
     local task, tasks = 0, 0
@@ -317,17 +318,18 @@ local function footer_lines()
 end
 
 -- Fixes the sizes and the columns from the rows and the editor: the window is 80% by 80% of the editor. With
--- room for it the details get a pane of their own; without it the list takes the whole width. The columns of
--- a row drop out when there is no room: its detail text first, then its state word, then the name shrinks.
+-- room for it the details get a pane of their own; without it the list takes the whole width. The name column
+-- shrinks when the list is narrow, and the status message is what is left after the other columns.
 local function measure(list)
-    local name_w, progress_w = 0, 0
+    local name_w, max_tasks = 0, 0
     for _, row in ipairs(list) do
         name_w = math.max(name_w, width_of(row.name))
-        progress_w = math.max(progress_w, parts_width(pill_parts(row.tasks, row.tasks, 'loaded')))
+        max_tasks = math.max(max_tasks, row.tasks)
     end
     name_w = math.min(name_w, NAME_MAX)
-    local with_state = 3 + name_w + 1 + TAG_W + 1 + STATE_W + 1 + progress_w + 1 + TIME_W + 1
-    local without_name = 3 + 1 + TAG_W + 1 + progress_w + 1 + TIME_W + 1
+    view.digits = #tostring(max_tasks)
+    local pill_w = parts_width(pill_parts(max_tasks, max_tasks, 'loaded'))
+    local without_name = 1 + 2 + TIME_COL + 1 + TAG_W + 1 + pill_w
 
     local lines = vim.o.lines - vim.o.cmdheight
     view.outer_w = math.max(math.floor(vim.o.columns * SHARE), 20)
@@ -335,7 +337,7 @@ local function measure(list)
     view.full_w = view.outer_w - 2
 
     local inner = view.outer_w - 4
-    local list_w = math.min(with_state, math.floor(inner * LIST_SHARE))
+    local list_w = math.min(without_name + name_w + 1 + MESSAGE_W, math.floor(inner * LIST_SHARE))
     local detail_w = inner - list_w
     if list_w >= LIST_MIN and detail_w >= DETAIL_MIN then
         view.list_w, view.detail_w = list_w, detail_w
@@ -343,13 +345,10 @@ local function measure(list)
         view.list_w, view.detail_w = view.outer_w - 2, nil
     end
 
-    view.progress_w = progress_w
-    view.show_state = view.list_w >= with_state
-    view.name_w = view.show_state and name_w
-        or math.max(math.min(name_w, view.list_w - without_name), NAME_MIN)
-    local used = view.show_state and with_state or (without_name + view.name_w)
-    -- Less than a few characters of detail says nothing, so the column goes.
-    view.detail = view.list_w - used >= 4 and view.list_w - used or 0
+    view.name_w = math.max(math.min(name_w, view.list_w - without_name), NAME_MIN)
+    -- Less than a few characters of message says nothing, so the column goes.
+    local left = view.list_w - without_name - view.name_w - 1
+    view.message = left >= 4 and left or 0
 
     -- The header and the footer take what they need, and the list and the details the rest.
     local chrome = HEADER_OUTER + FOOTER_OUTER
@@ -546,7 +545,7 @@ function M.draw_details(buf)
         if row.duration then table.insert(widget, { ' ' .. format_time(row.duration), 'SarcinaStepTime' }) end
         table.insert(lines, build_line(widget))
         add('timing', row.timing)
-        add('src', spec.repo)
+        add('src', spec.repo and require('sarcina.executors').clone_url(spec.repo) or nil)
         add('path', vim.fn.fnamemodify(dir, ':~'))
         add('rev', rev_of(selected, dir))
         add('deps', type(spec.deps) == 'table' and table.concat(spec.deps, ', ') or nil)

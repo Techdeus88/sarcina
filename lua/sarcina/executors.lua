@@ -38,10 +38,12 @@ local function last_line(data)
     return last
 end
 
+--- The URL a `repo` is cloned from: `owner/repo` is on GitHub, and anything else is used as it is.
 local function clone_url(repo)
     if repo:match('^%w[%w_.-]*/[%w_.-]+$') then return 'https://github.com/' .. repo end
     return repo
 end
+M.clone_url = clone_url
 
 -- cb runs in a fast event, so it must vim.schedule before using the API.
 local function run_cmd(cmd, opts, report, cb)

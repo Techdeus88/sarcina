@@ -107,9 +107,13 @@ test('an appended run keeps earlier failures in the window', function()
     h.ok(vim.wait(200, win_open))
     append_run({ loaded('b') })
     vim.wait(100)
-    local text = table.concat(lines(), '\n')
-    h.ok(text:find('✘ a%s+later%s+failed'), text)
-    h.ok(text:find('✔ b%s+later%s+loaded'), text)
+    local function row_of(name)
+        for _, line in ipairs(lines()) do
+            if line:find('^ ' .. name .. '%s') then return line end
+        end
+    end
+    h.ok(row_of('a'):find('later.*1/1%s+tasks ✘'), row_of('a'))
+    h.ok(row_of('b'):find('later.*1/1%s+tasks ✔'), row_of('b'))
 end)
 
 test('the cursor sits on the plugin at work, else on the last failed one', function()

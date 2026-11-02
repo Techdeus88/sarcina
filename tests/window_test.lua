@@ -56,6 +56,13 @@ end
 
 local function loaded(name) return { name = name, tasks = { h.lua('rtp', h.noop) } } end
 
+-- The row of the plugin `name` in the list.
+local function row_of(name)
+    for _, line in ipairs(lines()) do
+        if line:find('^ ' .. vim.pesc(name) .. '%s') then return line end
+    end
+end
+
 -- Runs `fn` with the editor at the given size, then puts the size back.
 local function with_size(columns, rows, fn)
     local old_columns, old_lines = vim.o.columns, vim.o.lines
@@ -85,9 +92,8 @@ test('there is one row per plugin in load order, with its state and its task cou
         for i = 1, 6 do
             h.ok(got[i]:find('plugin' .. i, 1, true), 'row ' .. i .. ' is ' .. got[i])
         end
-        h.ok(got[1]:find('✔ plugin1%s+later%s+loaded%s+.*2 of 2%s+tasks'), got[1])
-        h.ok(got[1]:find('2 of 2%s+tasks ✔.+[<%d%.]+ms'), 'a fast plugin has no time: ' .. got[1])
-        h.ok(got[3]:find('✘ plugin3%s+later%s+failed%s+.*2 of 2%s+tasks.+[<%d%.]+ms'), got[3])
+        h.ok(got[1]:find('^ plugin1%s+%([<%d%.]+ms%)%s+later%s+.*2/2%s+tasks ✔.*loaded'), got[1])
+        h.ok(got[3]:find('^ plugin3%s+%([<%d%.]+ms%)%s+later%s+.*2/2%s+tasks ✘.*failed'), got[3])
         h.ok(details_text():find('detail%s+boom'), 'the failed plugin is selected: ' .. details_text())
     end)
 end)
@@ -100,7 +106,7 @@ test('a running row shows its work, and the details show its output, until it is
     with_size(200, 50, function()
         h.ok(vim.wait(500, win_open), 'the window never opened')
         h.ok(vim.wait(500, function() return lines()[1]:find('installing', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('▶ slow%s+later%s+installing%s+.*1 of 2%s+tasks'), lines()[1])
+        h.ok(lines()[1]:find('^ slow%s+.*later%s+.*1/2%s+tasks ▶.*installing'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
         h.ok(
             vim.wait(500, function() return details_text():find('Receiving objects: 45%', 1, true) end),
@@ -110,7 +116,7 @@ test('a running row shows its work, and the details show its output, until it is
         release()
         h.ok(tasks.wait(2000))
         h.ok(vim.wait(500, function() return lines()[1]:find('loaded', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('✔ slow%s+later%s+loaded%s+.*2 of 2%s+tasks'), lines()[1])
+        h.ok(lines()[1]:find('^ slow%s+.*later%s+.*2/2%s+tasks ✔.*loaded'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
     end)
 end)
@@ -153,17 +159,17 @@ test('a row moves up when its plugin loads, so the rows keep the order of the lo
     h.register({ held, fast })
     with_size(200, 50, function()
         ui.open()
-        h.ok(lines()[1]:find('a%s+later%s+pending'), lines()[1])
-        h.ok(lines()[2]:find('b%s+later%s+pending'), lines()[2])
+        h.ok(lines()[1]:find('^ a%s+later%s+.*tasks …'), lines()[1])
+        h.ok(lines()[2]:find('^ b%s+later%s+.*tasks …'), lines()[2])
         tasks.enqueue('a', held)
         tasks.enqueue('b', fast)
         tasks.run_all()
-        h.ok(vim.wait(500, function() return lines()[1]:find('✔ b%s+later%s+loaded') end), lines()[1])
-        h.ok(lines()[2]:find('▶ a%s+later%s+installing'), lines()[2])
+        h.ok(vim.wait(500, function() return lines()[1]:find('^ b%s+.*later%s+.*tasks ✔') end), lines()[1])
+        h.ok(lines()[2]:find('^ a%s+.*later%s+.*tasks ▶'), lines()[2])
         release()
         h.ok(tasks.wait(2000))
-        h.ok(vim.wait(500, function() return lines()[2]:find('✔ a%s+later%s+loaded') end), lines()[2])
-        h.ok(lines()[1]:find('✔ b%s+later%s+loaded'), lines()[1])
+        h.ok(vim.wait(500, function() return lines()[2]:find('^ a%s+.*later%s+.*tasks ✔') end), lines()[2])
+        h.ok(lines()[1]:find('^ b%s+.*later%s+.*tasks ✔'), lines()[1])
     end)
 end)
 
@@ -204,13 +210,13 @@ test(
             ui.open()
             h.ok(vim.wait(500, function() return lines()[3]:find('installing', 1, true) end), lines()[3])
             local got = lines()
-            h.ok(got[1]:find(' 1 of 1 %s+tasks ✔ '), 'a loaded plugin is checked: ' .. got[1])
+            h.ok(got[1]:find(' 1/1 %s*tasks ✔ '), 'a loaded plugin is checked: ' .. got[1])
             h.ok(
-                got[2]:find(' 1 of 1 %s+tasks ') and not got[2]:find('✔', 1, true),
+                got[2]:find(' 1/1 %s*tasks ✘ ') and not got[2]:find('✔', 1, true),
                 'a failure is not: ' .. got[2]
             )
-            h.ok(got[3]:find(' 1 of 2 %s+tasks '), got[3])
-            h.ok(got[4]:find(' 0 of 1 %s+tasks '), got[4])
+            h.ok(got[3]:find(' 1/2 %s*tasks ▶ '), got[3])
+            h.ok(got[4]:find(' 0/1 %s*tasks … '), got[4])
             -- Each widget has four parts, in the colour of its state: the two ends, the count and the label.
             for line, kind in pairs({ [1] = 'Done', [2] = 'Failed', [3] = 'Running', [4] = 'Idle' }) do
                 local groups = groups_on(line)
@@ -226,6 +232,12 @@ test(
         end)
     end
 )
+
+-- How wide a row is up to the word `tasks` of its widget, which is where its columns must line up.
+local function width_to_tasks(line)
+    local at = line:find('tasks', 1, true)
+    return vim.fn.strdisplaywidth(line:sub(1, at + 4))
+end
 
 test('the tasks widget has rounded ends unless rounded is off, and the columns stay aligned', function()
     local cap_left, cap_right = vim.fn.nr2char(0xe0b6), vim.fn.nr2char(0xe0b4)
@@ -244,8 +256,8 @@ test('the tasks widget has rounded ends unless rounded is off, and the columns s
                 'a row has no round ends: ' .. line
             )
         end
-        h.eq(vim.fn.strdisplaywidth(got[1]), vim.fn.strdisplaywidth(got[2]))
-        h.eq(vim.fn.strdisplaywidth(got[2]), vim.fn.strdisplaywidth(got[3]))
+        h.eq(width_to_tasks(got[1]), width_to_tasks(got[2]))
+        h.eq(width_to_tasks(got[2]), width_to_tasks(got[3]))
         ui.configure({ rounded = false })
         ui.open()
         for _, line in ipairs(lines()) do
@@ -254,9 +266,87 @@ test('the tasks widget has rounded ends unless rounded is off, and the columns s
                 'a flat row has ends: ' .. line
             )
         end
-        h.eq(vim.fn.strdisplaywidth(lines()[1]), vim.fn.strdisplaywidth(lines()[3]))
+        h.eq(width_to_tasks(lines()[1]), width_to_tasks(lines()[3]))
         ui.configure(nil)
         h.eq(window.rounded, true)
+    end)
+end)
+
+test(
+    'a row is the name, its load time in brackets, when it loads, the task pill and the status message',
+    function()
+        local plugins = {
+            loaded('plugin'),
+            { name = 'broken', tasks = { h.lua('rtp', function() error('it broke') end) } },
+            { name = 'running', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } },
+        }
+        h.register(plugins)
+        h.run({ plugins[1], plugins[2] })
+        tasks.enqueue('running', plugins[3])
+        tasks.run_all()
+        with_size(200, 50, function()
+            ui.open()
+            h.ok(
+                vim.wait(500, function() return row_of('running'):find('installing · Receiv', 1, true) end),
+                row_of('running')
+            )
+            -- name, (load time), when it loads, count/total tasks and the icon of the state, status message
+            h.ok(
+                row_of('plugin'):find('^ plugin%s+%([<%d%.]+ms%)%s+later%s+.-1/1%s+tasks ✔.-%s+loaded%s*$'),
+                row_of('plugin')
+            )
+            h.ok(
+                row_of('broken'):find(
+                    '^ broken%s+%([<%d%.]+ms%)%s+later%s+.-1/1%s+tasks ✘.-%s+failed · it broke%s*$'
+                ),
+                row_of('broken')
+            )
+            h.ok(
+                row_of('running'):find('^ running%s+later%s+.-1/2%s+tasks ▶.-%s+installing · Receiv'),
+                row_of('running')
+            )
+            h.ok(not row_of('plugin'):find('^ ✔'), 'a row starts with its name, not an icon')
+            release()
+            h.ok(tasks.wait(2000))
+        end)
+    end
+)
+
+test('the status message gives way to a narrow list, and the pill still says the state', function()
+    local held = { name = 'a', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
+    h.register({ held })
+    tasks.enqueue('a', held)
+    tasks.run_all()
+    with_size(120, 40, function()
+        h.ok(vim.wait(500, win_open), 'the window never opened')
+        h.ok(vim.wait(500, function() return lines()[1]:find('tasks ▶', 1, true) end), lines()[1])
+        h.eq(ui._detail_winid ~= nil, true)
+        h.ok(
+            not lines()[1]:find('installing', 1, true),
+            'a narrow list has no room for the message: ' .. lines()[1]
+        )
+        release()
+        h.ok(tasks.wait(2000))
+    end)
+end)
+
+test('the src of a plugin is the URL it is cloned from', function()
+    h.register({
+        { name = 'short', repo = 'owner/short', tasks = { h.lua('rtp', h.noop) } },
+        { name = 'full', repo = 'https://example.com/team/full.git', tasks = { h.lua('rtp', h.noop) } },
+        { name = 'file', repo = 'file:///tmp/file-remote', tasks = { h.lua('rtp', h.noop) } },
+    })
+    with_size(200, 50, function()
+        ui.open()
+        for line, expected in pairs({
+            [1] = 'https://github.com/owner/short',
+            [2] = 'https://example.com/team/full.git',
+            [3] = 'file:///tmp/file-remote',
+        }) do
+            vim.api.nvim_win_set_cursor(ui._winid, { line, 0 })
+            vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+            h.ok(details_text():find('src%s+' .. vim.pesc(expected) .. '\n'), details_text())
+        end
     end)
 end)
 
@@ -274,7 +364,7 @@ test('a plugin that waits for its trigger is yellow, with a yellow pill', functi
     h.run({ { name = 'waits', tasks = { plugin.tasks[1] } } })
     with_size(200, 50, function()
         ui.open()
-        h.ok(lines()[1]:find('○ waits%s+trigger%s+waiting'), lines()[1])
+        h.ok(lines()[1]:find('^ waits%s+.*trigger%s+.*1/2%s+tasks ○.*waiting for :Waits'), lines()[1])
         local groups = groups_on(1)
         h.ok(groups.SarcinaWaiting, 'the glyph and the state are not yellow')
         h.ok(groups.SarcinaPillWaitingCount and groups.SarcinaPillWaiting, 'the pill is not yellow')
@@ -421,7 +511,7 @@ test('with no room for two panes the list takes the width and its rows keep the 
     with_size(100, 40, function()
         h.ok(vim.wait(500, win_open), 'the window never opened')
         h.ok(
-            vim.wait(500, function() return lines()[1]:find('Receiving objects: 45%', 1, true) end),
+            vim.wait(500, function() return lines()[1]:find('installing · Receiving', 1, true) end),
             lines()[1]
         )
         h.eq(ui._detail_winid, nil)
@@ -496,9 +586,9 @@ test('the details show where a plugin comes from, what it waits for, and each of
         local text = details_text()
         for _, expected in ipairs({
             'state%s+✔ loaded',
-            'tasks%s+.*2 of 2%s+tasks ✔.*%d+ms',
+            'tasks%s+.*2/2%s+tasks ✔.*%d+ms',
             'timing%s+trigger',
-            'src%s+owner/detailed',
+            'src%s+https://github%.com/owner/detailed',
             'deps%s+depone, deptwo',
             'triggers%s+:DetailedCmd',
             'armed%s+waiting',
@@ -797,8 +887,8 @@ if vim.fn.executable('git') == 1 then
         h.ok(vim.wait(2000, win_open), 'the window never opened for the clone')
         h.ok(tasks.wait(5000))
         -- At 80 columns the state word gives way, and the glyph and the check say it.
-        h.ok(vim.wait(500, function() return lines()[1]:find('✔ clonewin', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('✔ clonewin.nvim%s+later%s+.*2 of 2%s+tasks ✔'), lines()[1])
+        h.ok(vim.wait(500, function() return lines()[1]:find('tasks ✔', 1, true) end), lines()[1])
+        h.ok(lines()[1]:find('^ clonewin.nvim%s+.*later%s+.*2/2%s+tasks ✔'), lines()[1])
     end)
 
     test(
@@ -858,7 +948,7 @@ if vim.fn.executable('git') == 1 then
         )
         local seen = run_child(spec)
         h.eq(seen.open, true)
-        h.ok(seen.lines[1]:find('✔ winchild.nvim%s+later%s+.*3 of 3%s+tasks ✔'), vim.inspect(seen.lines))
+        h.ok(seen.lines[1]:find('^ winchild.nvim%s+.*later%s+.*3/3%s+tasks ✔'), vim.inspect(seen.lines))
     end)
 
     test('in a real startup with everything installed no window opens', function()

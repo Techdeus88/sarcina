@@ -14,7 +14,7 @@ lua/sarcina/
 ├── main_module.lua   finds the module that a plugin's opts belong to
 ├── tasks.lua         task store and async runner; owns all task state
 ├── track.lua         stamps every task's created, started, ended and duration; keeps the session history
-├── stats.lua         the public numbers, and one row per plugin: state, task 3 of 8, detail
+├── stats.lua         the public numbers, and one row per plugin: state, task 3/8, detail
 ├── executors.lua     one function per task type (git_clone, rtp, lua, cmd, shell, keymaps, trigger, make)
 ├── scheduler.lua     stubs and deferred loading for triggered plugins
 ├── keys.lua          parses `keys` entries into a lhs, an rhs, a mode and options
@@ -279,27 +279,27 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
 │ Total: 55 plugins                                            │
 │                        127/210 tasks                         │
 ╰──────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────╮╭ avante.nvim ──────────────╮
-│ ✔ plenary.nvim later   loaded  3 ││ state     ✘ failed        │
-│ ▶ telescope    trigger installing││ tasks     2 of 3 tasks    │
-│ ○ blink.cmp    trigger waiting 2 ││ timing    later           │
-│ ✘ avante.nvim  later   failed  2 ││ src       yetone/avante   │
-│ ⊘ smart-splits later   blocked 1 ││ path      ~/.local/share… │
-╰──────────────────────────────────╯│ rev       5e4e310         │
-╭──────────────────────────────────╮│                           │
-│ Now 7, Later 18, Triggered 30    ││ Tasks                     │
-╰──────── q close · ^d ^u ─────────╯│ ✔ install 104ms installed │
-                                    │ ✘ build 12ms make: comm…  │
-                                    ╰───────────────────────────╯
+╭──────────────────────────────────────────╮╭ avante.nvim ────────────────╮
+│ plenary.nvim   (110ms) later   3/3 tasks ✔ ││ state     ✘ failed          │
+│ telescope.nvim (2.1s)  trigger 1/6 tasks ▶ ││ tasks     2/3 tasks ✘       │
+│ blink.cmp      (8ms)   trigger 2/6 tasks ○ ││ timing    later             │
+│ avante.nvim    (120ms) later   2/3 tasks ✘ ││ src       https://github.co │
+│ smart-splits   (62ms)  later   1/3 tasks ⊘ ││ path      ~/.local/share/…  │
+╰──────────────────────────────────────────╯│ rev       5e4e310           │
+╭──────────────────────────────────────────╮│                             │
+│ Now 7, Later 18, Triggered 30            ││ Tasks                       │
+╰──────────── q close · ^d ^u ─────────────╯│ ✔ install 104ms installed   │
+                                            │ ✘ build 12ms make: comm…    │
+                                            ╰─────────────────────────────╯
 ```
 
-**The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3 of 8 tasks`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** says how many load now, later and on a trigger, on the left, and the startup time on the right: `Now 7, Later 18, Triggered 30` and `Startup: 83ms`. Both come from `stats.get()`.
+**The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3/8`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** says how many load now, later and on a trigger, on the left, and the startup time on the right: `Now 7, Later 18, Triggered 30` and `Startup: 83ms`. Both come from `stats.get()`.
 
 **The list** has one row per plugin, in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. So installed `now` plugins come first, since they load before the UI, then the `later` ones as they finish, then triggered ones as they fire.
 
-A row has a glyph, the name, when it loads, its state, the tasks widget and the time. The glyph and the state word are coloured by state, and a plugin that waits for its trigger is yellow (`○`; `…` is a plugin that has not started, `▶` one at work, `✔` a loaded one, `✘` a failed one, `⊘` a blocked one).
+A row is `name  (load time) when it loads, tasks widget, status message`, for example `plenary.nvim  (110ms) later  3/3 tasks ✔ loaded`. The load time is the run time of all that plugin's tasks added up, not the load alone; a task counts when it ends, and time spent waiting behind the install barrier or a dependency does not. The status message is the state and what it adds, such as git's line or the error: `installing · Receiving objects`, `failed · make: command not found`, `waiting for :Telescope`. It takes what is left of the list after the other columns, so a narrow list drops it and the widget alone still says the state.
 
-The tasks widget is a button with rounded ends and two tones. The count (`3 of 8`) is on the colour of the state, in dark bold text, and the label (`tasks`) is a light tint of it in a darker shade, with a check (`tasks ✔`) once every task of the plugin is done. The colours come from your colorscheme's `DiagnosticOk` (loaded), `DiagnosticInfo` (at work), `DiagnosticWarn` (waiting), `DiagnosticError` (failed) and `Comment` (not started, or blocked), so the widget follows the theme. Each kind has four groups you can override, such as `SarcinaPillDoneLeft`, `SarcinaPillDoneCount`, `SarcinaPillDone` and `SarcinaPillDoneRight`; the same goes for `Running`, `Waiting`, `Failed` and `Idle`. The ends are Powerline glyphs, so they need a patched font (a Nerd Font); with `setup({ ui = { rounded = false } })` the widget has flat ends. The ends set only a foreground, so the cell behind them stays the window's, or the cursor line's, and they look round either way. When the list is too narrow, the state word goes before the widget does.
+The tasks widget is a button with rounded ends and two tones. The count (`3/8`) is on the colour of the state, in dark bold text, and the label (`tasks` and an icon) is a light tint of it in a darker shade. The icon is the state: `✔` loaded, `○` waiting for its trigger (yellow), `▶` at work, `✘` failed, `⊘` blocked, `…` not started. The colours come from your colorscheme's `DiagnosticOk` (loaded), `DiagnosticInfo` (at work), `DiagnosticWarn` (waiting), `DiagnosticError` (failed) and `Comment` (not started, or blocked), so the widget follows the theme. Each kind has four groups you can override, such as `SarcinaPillDoneLeft`, `SarcinaPillDoneCount`, `SarcinaPillDone` and `SarcinaPillDoneRight`; the same goes for `Running`, `Waiting`, `Failed` and `Idle`. The ends are Powerline glyphs, so they need a patched font (a Nerd Font); with `setup({ ui = { rounded = false } })` the widget has flat ends. The ends set only a foreground, so the cell behind them stays the window's, or the cursor line's, and they look round either way.
 
 The time is the run time of all that plugin's tasks added up, not the load alone. A task counts when it ends, and time spent waiting behind the install barrier or a dependency does not.
 
@@ -308,7 +308,7 @@ The time is the run time of all that plugin's tasks added up, not the load alone
 | Key | Is |
 | --- | --- |
 | `state`, `tasks`, `timing` | what the row says, with the plugin's total time |
-| `src`, `path` | the `repo` as written, and the directory it lives in (`dir`, or where it was cloned) |
+| `src`, `path` | the URL it is cloned from (`owner/repo` is `https://github.com/owner/repo`, and a full URL is shown as it is), and the directory it lives in (`dir`, or where it was cloned) |
 | `rev` | the short commit in that directory, read in the background |
 | `deps`, `triggers`, `armed` | what it needs, what loads it, and whether that is still `waiting`, `loading`, `loaded` or `failed` |
 | `origin` | the spec file it came from |
