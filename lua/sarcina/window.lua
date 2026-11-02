@@ -53,10 +53,30 @@ local HL_LINKS = {
     SarcinaTag = 'Comment',
     SarcinaHeader = 'Title',
     SarcinaFooter = 'Comment',
+    SarcinaStepInstall = 'Function',
+    SarcinaStepBefore = 'Special',
+    SarcinaStepBuild = 'Constant',
+    SarcinaStepTrigger = 'Keyword',
+    SarcinaStepRtp = 'String',
+    SarcinaStepLoad = 'Type',
+    SarcinaStepKeys = 'Identifier',
+    SarcinaStepAfter = 'Statement',
+    SarcinaStepOther = 'Normal',
+}
+-- Each task of a plan has a colour of its own in the details, so the lines stand out from each other.
+local STEP_GROUP = {
+    install = 'SarcinaStepInstall',
+    before = 'SarcinaStepBefore',
+    build = 'SarcinaStepBuild',
+    load_trigger = 'SarcinaStepTrigger',
+    rtp = 'SarcinaStepRtp',
+    load = 'SarcinaStepLoad',
+    keys = 'SarcinaStepKeys',
+    after = 'SarcinaStepAfter',
 }
 
 local NAME_MAX, NAME_MIN, TAG_W, STATE_W, TIME_W = 28, 10, 7, 10, 6
-local KEY_W, STEP_W = 9, 11
+local KEY_W = 9
 -- The window takes 80% of the editor each way: a header across the top, a footer across the bottom, and
 -- between them the list and the details, which scroll. The list gets at most 55% of the width, and the
 -- details pane only exists when both panes have this much room.
@@ -124,6 +144,12 @@ function M.define_highlights()
     for name, link in pairs(HL_LINKS) do
         vim.api.nvim_set_hl(0, name, { link = link, default = true })
     end
+    -- The time of a task: bold and in the colour of the text, against the colour of the task beside it.
+    vim.api.nvim_set_hl(
+        0,
+        'SarcinaStepTime',
+        { bold = true, fg = vim.api.nvim_get_hl(0, { name = 'Normal', link = false }).fg, default = true }
+    )
     for name, pill in pairs(PILLS) do
         local color = vim.api.nvim_get_hl(0, { name = pill.from, link = false }).fg or pill.fallback
         vim.api.nvim_set_hl(
@@ -482,6 +508,7 @@ function M.draw_details(buf)
             row.state == 'failed' and 'SarcinaFailed' or 'SarcinaNote'
         )
         table.insert(lines, build_line({}))
+        table.insert(lines, build_line({ { 'Tasks', 'SarcinaHeader' } }))
         for _, step in ipairs(stats.steps(selected)) do
             local note, group = step_note(step)
             local time = format_time(step.duration)
@@ -491,9 +518,10 @@ function M.draw_details(buf)
                     { ' ' },
                     { STEP_GLYPH[step.status], STEP_HL[step.status] },
                     { ' ' },
-                    { pad(step.id, STEP_W), 'SarcinaName' },
-                    { string.rep(' ', TIME_W - width_of(time)) .. time, 'SarcinaNote' },
-                    { note and ' ' .. (note:gsub('%s+', ' ')) or '', group },
+                    { step.id, STEP_GROUP[step.id] or 'SarcinaStepOther' },
+                    { time ~= '' and ' ' or '' },
+                    { time, 'SarcinaStepTime' },
+                    { note and '  ' .. (note:gsub('%s+', ' ')) or '', group },
                 })
             )
         end

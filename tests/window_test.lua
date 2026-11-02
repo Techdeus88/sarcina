@@ -188,39 +188,34 @@ end
 test(
     'the tasks widget is a pill in the colour of the state, with a check only when all tasks are done',
     function()
-        local waiting = { name = 'waiting', tasks = { h.lua('rtp', h.noop) } }
         local plugins = {
             loaded('done'),
             { name = 'failed', tasks = { h.lua('rtp', function() error('no') end) } },
             { name = 'running', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } },
-            { name = 'idle', tasks = { h.lua('rtp', h.noop) } },
-            waiting,
+            loaded('idle'),
         }
         h.register(plugins)
-        -- `waiting` is a plugin whose trigger is armed and whose tasks have not run.
         h.run({ plugins[1], plugins[2] })
         tasks.enqueue('running', plugins[3])
-        local trigger = { id = 'load_trigger', type = 'lua', fn = h.noop }
         tasks.run_all()
         with_size(200, 50, function()
             ui.open()
             h.ok(vim.wait(500, function() return lines()[3]:find('installing', 1, true) end), lines()[3])
             local got = lines()
-            h.ok(got[1]:find('2 of 1 tasks') == nil, got[1])
-            h.ok(got[1]:find(' 1 of 1 tasks ✔ '), got[1])
+            h.ok(got[1]:find(' 1 of 1 tasks ✔ '), 'a loaded plugin is checked: ' .. got[1])
             h.ok(
-                got[2]:find(' 1 of 1 tasks %s') and not got[2]:find('✔', 5, true),
-                'no check for a failure: ' .. got[2]
+                got[2]:find(' 1 of 1 tasks  ') and not got[2]:find('✔', 5, true),
+                'a failure is not: ' .. got[2]
             )
             h.ok(got[3]:find(' 1 of 2 tasks '), got[3])
+            h.ok(got[4]:find(' 0 of 1 tasks '), got[4])
             h.ok(groups_on(1).SarcinaTaskDone, 'a loaded plugin has a green pill')
             h.ok(groups_on(2).SarcinaTaskFailed, 'a failed plugin has a red pill')
             h.ok(groups_on(3).SarcinaTaskRunning, 'a running plugin has a blue pill')
-            h.ok(groups_on(5).SarcinaTaskIdle, 'a plugin that has not started has a grey pill')
+            h.ok(groups_on(4).SarcinaTaskIdle, 'a plugin that has not started has a grey pill')
             release()
             h.ok(tasks.wait(2000))
         end)
-        local _ = trigger
     end
 )
 
@@ -411,6 +406,92 @@ test('the details show where a plugin comes from, what it waits for, and each of
         h.ok(text:find('path%s+' .. vim.pesc(path)), text)
         h.eq(title_of(ui._detail_winid), ' detailed ')
         h.eq({ vim.wo[ui._detail_winid].wrap, vim.wo[ui._detail_winid].breakindent }, { true, true })
+    end)
+end)
+
+-- The text of each highlighted piece of a line of the details, as { text = group }.
+local function pieces(lnum)
+    local ns = vim.api.nvim_get_namespaces().sarcina_details
+    local line = vim.api.nvim_buf_get_lines(ui._detail_bufnr, lnum - 1, lnum, false)[1]
+    local found = {}
+    for _, mark in
+        ipairs(
+            vim.api.nvim_buf_get_extmarks(
+                ui._detail_bufnr,
+                ns,
+                { lnum - 1, 0 },
+                { lnum - 1, -1 },
+                { details = true }
+            )
+        )
+    do
+        found[line:sub(mark[3] + 1, mark[4].end_col)] = mark[4].hl_group
+    end
+    return found
+end
+
+-- The line of the details that starts with `text`.
+local function line_with(text)
+    for lnum, line in ipairs(details()) do
+        if vim.startswith(vim.trim(line), text) then return lnum end
+    end
+end
+
+test('the details put a Tasks title above the tasks, and the time right after the task', function()
+    local plugin = { name = 'titled', tasks = { h.lua('rtp', h.noop), { id = 'load', type = 'w_slow' } } }
+    h.register({ plugin })
+    h.run({ plugin })
+    with_size(200, 50, function()
+        ui.open()
+        local got = details()
+        local title = line_with('Tasks')
+        h.ok(title, 'there is no Tasks title: ' .. details_text())
+        h.eq(got[title - 1], '')
+        h.ok(
+            got[title + 1]:find('^ ✔ rtp [<%d%.]+ms'),
+            'the time is not right after the task: ' .. got[title + 1]
+        )
+        h.ok(
+            got[title + 2]:find('^ ✔ load %d+ms'),
+            'the time is not right after the task: ' .. got[title + 2]
+        )
+        h.eq(pieces(title).Tasks, 'SarcinaHeader')
+    end)
+end)
+
+test('each task has a highlight of its own, and its time stands out from it', function()
+    local ids = { 'install', 'before', 'build', 'load_trigger', 'rtp', 'load', 'keys', 'after', 'custom' }
+    local steps = {}
+    for _, id in ipairs(ids) do
+        table.insert(steps, h.lua(id, h.noop))
+    end
+    h.register({ { name = 'colourful', tasks = steps } })
+    h.run({ { name = 'colourful', tasks = steps } })
+    local expected = {
+        install = 'SarcinaStepInstall',
+        before = 'SarcinaStepBefore',
+        build = 'SarcinaStepBuild',
+        load_trigger = 'SarcinaStepTrigger',
+        rtp = 'SarcinaStepRtp',
+        load = 'SarcinaStepLoad',
+        keys = 'SarcinaStepKeys',
+        after = 'SarcinaStepAfter',
+        custom = 'SarcinaStepOther',
+    }
+    with_size(200, 50, function()
+        ui.open()
+        local seen = {}
+        for _, id in ipairs(ids) do
+            local lnum = line_with('✔ ' .. id)
+            h.ok(lnum, id .. ' has no line: ' .. details_text())
+            local marked = pieces(lnum)
+            h.eq(marked[id], expected[id], id)
+            seen[marked[id]] = true
+            local time = details()[lnum]:match('%S+ ([<%d%.]+ms)')
+            h.eq(marked[time], 'SarcinaStepTime', 'the time of ' .. id)
+        end
+        h.eq(vim.tbl_count(seen), #ids - 1 + 1, 'two tasks share a highlight')
+        h.eq(vim.api.nvim_get_hl(0, { name = 'SarcinaStepTime', link = false }).bold, true)
     end)
 end)
 

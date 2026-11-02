@@ -93,20 +93,28 @@ function M.shell(job, done, report)
     run_cmd(vim.list_extend(shell, { job.spec.cmd }), { cwd = cwd }, report, done)
 end
 
--- Returns false and why when the plugin directory is missing.
-local function add_to_rtp(name)
+local sourced = {} -- plugin directory -> true once its plugin/ files were sourced, or Neovim will source them
+
+-- Puts the plugin on the runtimepath and, once the UI is up, sources its plugin/ files, once. `source = false`
+-- only puts it on the runtimepath, so a build can require its modules before the plugin has run: a plugin
+-- that loads a binary from plugin/ cannot run before its build has made the binary. Returns false and why
+-- when the plugin directory is missing.
+local function add_to_rtp(name, source)
     local path = paths.install(name)
     if not uv.fs_stat(path) then return false, 'plugin directory missing: ' .. path end
-    local rtp = vim.opt.rtp:get() --[[@as string[] ]]
-    if vim.tbl_contains(rtp, path) then return true end
-    -- Like a start/ package: the plugin joins the runtimepath, its after/ dir goes behind it.
     local dirs = { path }
     if uv.fs_stat(path .. '/after') then table.insert(dirs, path .. '/after') end
-    for _, dir in ipairs(dirs) do
-        vim.opt.rtp:append(dir)
+    local rtp = vim.opt.rtp:get() --[[@as string[] ]]
+    if not vim.tbl_contains(rtp, path) then
+        -- Like a start/ package: the plugin joins the runtimepath, its after/ dir goes behind it.
+        for _, dir in ipairs(dirs) do
+            vim.opt.rtp:append(dir)
+        end
+        -- Before VimEnter, Neovim's own startup pass sources plugin/ and after/plugin from the rtp.
+        sourced[path] = vim.v.vim_did_enter == 0 or nil
     end
-    -- Before VimEnter, Neovim's own startup pass sources plugin/ and after/plugin from the rtp.
-    if vim.v.vim_did_enter == 1 then
+    if source ~= false and vim.v.vim_did_enter == 1 and not sourced[path] then
+        sourced[path] = true
         for _, dir in ipairs(dirs) do
             source_plugin_files(dir)
         end
@@ -202,7 +210,8 @@ local function write_record(path, commit)
     file:close()
 end
 
--- `needs_plugin` puts the plugin on the runtimepath first, for code that calls into it.
+-- `needs_plugin` puts the plugin on the runtimepath first, for code that requires its modules. Its plugin/
+-- files wait for the `rtp` task.
 local function per_commit(exec, needs_plugin)
     return function(job, done, report)
         if not job.spec.per_commit then return exec(job, done, report) end
@@ -211,7 +220,7 @@ local function per_commit(exec, needs_plugin)
             if commit and read_record(record) == commit then return done(true, 'up to date') end
             job.working = true
             report()
-            if needs_plugin then add_to_rtp(job.plugin) end
+            if needs_plugin then add_to_rtp(job.plugin, false) end
             exec(job, function(ok, msg)
                 if ok and commit then write_record(record, commit) end
                 done(ok, msg)

@@ -28,7 +28,7 @@ local function run_child(name, task, before_startup)
         before_startup and 'tasks.wait(5000)' or '',
         "vim.api.nvim_create_autocmd('VimEnter', { callback = function()",
         '    tasks.wait(5000)',
-        '    io.stdout:write(vim.json.encode({ main = vim.g.main_ran, after = vim.g.after_ran, built = vim.g.built }))',
+        '    io.stdout:write(vim.json.encode({ main = vim.g.main_ran, after = vim.g.after_ran, built = vim.g.built, count = vim.g.main_count }))',
         '    vim.cmd.qa()',
         'end })',
     }, script)
@@ -46,6 +46,36 @@ end)
 test('an rtp task before startup leaves plugin/ and after/plugin to Neovim', function()
     layered_plugin('early.nvim')
     h.eq(run_child('early.nvim', RTP_TASK, true), { main = true, after = true })
+end)
+
+-- plugin/ counts how many times it is sourced, and lua/ has a module a build can require.
+local function counted_plugin(name)
+    local dir = paths.install(name)
+    vim.fn.mkdir(dir .. '/plugin', 'p')
+    vim.fn.mkdir(dir .. '/lua/counted', 'p')
+    vim.fn.writefile(
+        { 'vim.g.main_count = (vim.g.main_count or 0) + 1', 'vim.g.main_ran = true' },
+        dir .. '/plugin/main.lua'
+    )
+    vim.fn.writefile({ 'return { ok = true }' }, dir .. '/lua/counted/init.lua')
+end
+
+-- A build that records whether plugin/ had run when it was called and whether it could require the plugin.
+local BUILD_TASK = "{ id = 'build', type = 'lua', per_commit = true, fn = function() "
+    .. "vim.g.built = vim.g.main_ran == nil and require('counted').ok end }"
+
+test('a function build finds the plugin modules, but its plugin/ files wait for the rtp task', function()
+    counted_plugin('prebuild.nvim')
+    local seen = run_child('prebuild.nvim', BUILD_TASK .. ', ' .. RTP_TASK, false)
+    h.eq(seen.built, true)
+    h.eq(seen.main, true)
+end)
+
+test('plugin/ is sourced once, though a build and two rtp tasks put the plugin on the runtimepath', function()
+    counted_plugin('once.nvim')
+    local seen =
+        run_child('once.nvim', BUILD_TASK .. ', ' .. RTP_TASK .. ', { id = "again", type = "rtp" }', false)
+    h.eq(seen.count, 1)
 end)
 
 test('a cmd task runs a command that the plugin defines in plugin/', function()
