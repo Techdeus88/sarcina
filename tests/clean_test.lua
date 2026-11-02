@@ -58,6 +58,13 @@ test('stale lists the directories no plugin owns, sorted, and ignores files', fu
     vim.fn.delete(paths.plugins_dir() .. 'cl-notes.txt')
 end)
 
+test('stale ignores the staging directory', function()
+    empty_plugins_dir()
+    plugin_dir('cl-a.nvim')
+    plugin_dir('.staging')
+    h.eq(installer.stale(entries({})), { 'cl-a.nvim' })
+end)
+
 test('clean only lists them, and says how to delete them', function()
     empty_plugins_dir()
     manifest({ 'clkeep.nvim' })

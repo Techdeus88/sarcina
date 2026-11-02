@@ -38,7 +38,10 @@ function M.stale(resolved)
     while handle do
         local name, kind = vim.uv.fs_scandir_next(handle)
         if not name then break end
-        if (kind == 'directory' or kind == 'link') and not wanted[name] then table.insert(found, name) end
+        local hidden = name:sub(1, 1) == '.' -- sarcina's own, such as .staging
+        if (kind == 'directory' or kind == 'link') and not hidden and not wanted[name] then
+            table.insert(found, name)
+        end
     end
     table.sort(found)
     return found

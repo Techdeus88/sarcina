@@ -56,7 +56,7 @@ local function run_cmd(cmd, opts, report, cb)
     local spawn_opts =
         vim.tbl_extend('force', { text = true, stdout = on_output, stderr = on_output }, opts or {})
     local spawned, err = pcall(vim.system, cmd, spawn_opts, function(res)
-        if res.code == 0 then
+        if res.code == 0 and (res.signal or 0) == 0 then
             cb(true)
         elseif res.code == 124 and spawn_opts.timeout then
             cb(false, cmd[1] .. ' timed out')
@@ -92,7 +92,7 @@ local function git(dir, args, cb, network)
     local opts = vim.tbl_extend('force', { text = true }, network and remote_opts() or {})
     local spawned = pcall(vim.system, cmd, opts, function(res)
         vim.schedule(function()
-            if res.code == 0 then return cb(true, vim.trim(res.stdout or '')) end
+            if res.code == 0 and (res.signal or 0) == 0 then return cb(true, vim.trim(res.stdout or '')) end
             if network and res.code == 124 then return cb(false, 'git timed out') end
             local said = last_line(res.stderr or '') or last_line(res.stdout or '')
             cb(false, said or string.format('git exited with code %d', res.code))

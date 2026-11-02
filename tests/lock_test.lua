@@ -90,6 +90,8 @@ test('a file that cannot be read counts as empty and is replaced by the next wri
     flush()
     h.eq(read_file()['lkbad.nvim'].commit, head(repo))
     h.eq(vim.fn.glob(paths.lock_file() .. '.tmp'), '')
+    h.eq(vim.fn.readfile(paths.lock_file() .. '.bak'), { '{ not json' })
+    vim.fn.delete(paths.lock_file() .. '.bak')
 end)
 
 test('forget drops the entries of removed plugins and keeps the rest', function()

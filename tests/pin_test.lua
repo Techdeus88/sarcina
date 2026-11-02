@@ -55,7 +55,7 @@ test('a locked commit that cannot be fetched fails the install and leaves nothin
     h.ok(install.error:find('locked commit ddddddd is not available: ', 1, true), install.error)
     h.eq(h.job('lost.nvim', 'rtp').status, 'skipped')
     h.eq(vim.uv.fs_stat(paths.install('lost.nvim')), nil)
-    h.eq(vim.fn.glob(vim.fn.stdpath('cache') .. '/sarcina_staging/lost.nvim*', false, true), {})
+    h.eq(vim.fn.glob(require('sarcina.paths').plugins_dir() .. '.staging/lost.nvim*', false, true), {})
 end)
 
 test('a plugin with no entry gets the latest commit, and the lock file names it after the run', function()

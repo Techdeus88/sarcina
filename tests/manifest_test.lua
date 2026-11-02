@@ -45,6 +45,26 @@ test('a spec carries the file it was loaded from as origin', function()
     h.eq(origin, { ['x/a.nvim'] = list, ['x/b.nvim'] = 'mine', ['x/c.nvim'] = single })
 end)
 
+test('a file that returns a bare { "owner/repo" } is one spec, not a list', function()
+    local dir = spec_dir()
+    local file = dir .. '/manifest_bare.lua'
+    vim.fn.writefile({ "return { 'x/bare.nvim' }" }, file)
+    local specs = manifest.load({ spec_paths = { dir } })
+    vim.fn.delete(file)
+    h.eq(#specs, 1)
+    h.eq(specs[1].repo, 'x/bare.nvim')
+end)
+
+test('vim.g.sarcina_spec_paths adds spec directories', function()
+    local dir = vim.fn.tempname()
+    vim.fn.mkdir(dir, 'p')
+    vim.fn.writefile({ "return { { 'x/global.nvim' } }" }, dir .. '/g.lua')
+    vim.g.sarcina_spec_paths = dir
+    local specs = manifest.load({})
+    vim.g.sarcina_spec_paths = nil
+    h.eq(vim.tbl_map(function(spec) return spec.repo end, specs), { 'x/global.nvim' })
+end)
+
 test('expand_shorthand moves the first entry to repo', function()
     local spec = { 'owner/repo', opts = {} }
     manifest.expand_shorthand(spec)

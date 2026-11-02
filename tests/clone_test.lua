@@ -36,7 +36,7 @@ local function plugin(name, spec)
 end
 
 local function staging_leftovers()
-    return vim.fn.glob(vim.fn.stdpath('cache') .. '/sarcina_staging/*', false, true)
+    return vim.fn.glob(require('sarcina.paths').plugins_dir() .. '.staging/*', false, true)
 end
 
 if vim.fn.executable('git') == 0 then return {} end

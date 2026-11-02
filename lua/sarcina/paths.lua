@@ -23,8 +23,8 @@ function M.lock_file() return vim.fn.stdpath('config') .. '/sarcina-lock.json' e
 -- How long each plugin took to install, kept next to the plugins. See installs.lua.
 function M.installs_file() return vim.fn.stdpath('data') .. '/sarcina/installs.json' end
 
-function M.staging(name)
-    return string.format('%s/sarcina_staging/%s_%d', vim.fn.stdpath('cache'), name, vim.uv.hrtime())
-end
+-- Inside the plugins directory, so the move to the final place is a rename on one filesystem. The leading
+-- dot keeps `clean` from taking it for a plugin.
+function M.staging(name) return string.format('%s.staging/%s_%d', M.plugins_dir(), name, vim.uv.hrtime()) end
 
 return M

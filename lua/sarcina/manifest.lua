@@ -16,6 +16,8 @@ local DEFAULT_SPEC_DIR = vim.fn.stdpath('config') .. '/lua/plugins'
 -- Helper to detect an array‑like table (list of specs)
 local function is_list(t)
     if type(t) ~= 'table' then return false end
+    -- `{ 'owner/repo' }` is one spec with a shorthand repo, not a list: a list holds tables.
+    if type(t[1]) ~= 'table' and t[1] ~= nil then return false end
     local count = 0
     for k, _ in pairs(t) do
         if type(k) ~= 'number' then return false end
@@ -99,7 +101,7 @@ end
 --- Load all specs and normalise the optional shorthand `repo`.
 function M.load(opts)
     opts = opts or {}
-    local dirs = resolve_spec_dirs(opts.spec_paths)
+    local dirs = resolve_spec_dirs(opts.spec_paths or vim.g.sarcina_spec_paths)
     local specs = collect_specs_from_dirs(dirs)
     for _, spec in ipairs(specs) do
         M.expand_shorthand(spec)

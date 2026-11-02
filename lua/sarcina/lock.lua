@@ -13,14 +13,20 @@ local M = {}
 local cache -- plugin name -> { commit }, as last read or written
 local marked = {} -- plugin name -> its directory, for the plugins that changed since the last flush
 local warned = false
+local unreadable = false -- the last read found a file that is not valid JSON, such as one with merge markers
 
 local function read()
     local file = io.open(paths.lock_file(), 'r')
     local data = {}
+    unreadable = false
     if file then
         local ok, decoded = pcall(vim.json.decode, file:read('*a'))
         file:close()
-        if ok and type(decoded) == 'table' then data = decoded end
+        if ok and type(decoded) == 'table' then
+            data = decoded
+        else
+            unreadable = true
+        end
     end
     return data
 end
@@ -31,6 +37,16 @@ local function write(data)
     if not ok then text = vim.json.encode(data) end
     local path = paths.lock_file()
     vim.fn.mkdir(vim.fn.fnamemodify(path, ':h'), 'p')
+    -- Replacing a file that could not be read loses its pins, so keep a copy and say so.
+    if unreadable then
+        unreadable = false
+        if vim.uv.fs_copyfile(path, path .. '.bak') then
+            ui.emit(
+                'warning',
+                'The lock file was not valid JSON; it was replaced and the old one kept as ' .. path .. '.bak'
+            )
+        end
+    end
     local file = io.open(path .. '.tmp', 'w')
     local renamed = false
     if file then
@@ -106,7 +122,7 @@ end
 
 --- Forget what was read, marked and warned about. For tests.
 function M._reset()
-    cache, marked, warned = nil, {}, false
+    cache, marked, warned, unreadable = nil, {}, false, false
 end
 
 return M
