@@ -241,13 +241,7 @@ test(
     end
 )
 
--- How wide a row is up to the word `tasks` of its widget, which is where its columns must line up.
-local function width_to_tasks(line)
-    local at = line:find('tasks', 1, true)
-    return vim.fn.strdisplaywidth(line:sub(1, at + 4))
-end
-
-test('the tasks widget has rounded ends unless rounded is off, and the columns stay aligned', function()
+test('the tasks widget has rounded ends unless rounded is off', function()
     local cap_left, cap_right = vim.fn.nr2char(0xe0b6), vim.fn.nr2char(0xe0b4)
     h.register({
         loaded('a'),
@@ -257,15 +251,12 @@ test('the tasks widget has rounded ends unless rounded is off, and the columns s
     h.run({ loaded('a'), { name = 'bb', tasks = { h.lua('rtp', function() error('no') end) } } })
     with_size(200, 50, function()
         ui.open()
-        local got = lines()
-        for _, line in ipairs(got) do
+        for _, line in ipairs(lines()) do
             h.ok(
                 line:find(cap_left, 1, true) and line:find(cap_right, 1, true),
                 'a row has no round ends: ' .. line
             )
         end
-        h.eq(width_to_tasks(got[1]), width_to_tasks(got[2]))
-        h.eq(width_to_tasks(got[2]), width_to_tasks(got[3]))
         ui.configure({ rounded = false })
         ui.open()
         for _, line in ipairs(lines()) do
@@ -274,9 +265,23 @@ test('the tasks widget has rounded ends unless rounded is off, and the columns s
                 'a flat row has ends: ' .. line
             )
         end
-        h.eq(width_to_tasks(lines()[1]), width_to_tasks(lines()[3]))
         ui.configure(nil)
         h.eq(window.rounded, true)
+    end)
+end)
+
+test('the parts of a row are one space apart, with no padding after a short name', function()
+    local plugins = { loaded('a'), loaded('a-much-longer-name.nvim') }
+    h.register(plugins)
+    h.run(plugins)
+    with_size(200, 50, function()
+        ui.configure({ rounded = false })
+        ui.open()
+        for _, name in ipairs({ 'a', 'a-much-longer-name.nvim' }) do
+            local row = row_of(name)
+            h.ok(row:find('^ ' .. vim.pesc(name) .. ' %([<%d%.]+ms%) later  1/1  tasks ✔  loaded$'), row)
+        end
+        ui.configure(nil)
     end)
 end)
 
@@ -321,26 +326,28 @@ test(
 )
 
 test(
-    'the main view has room for the status message, and in the split view it gives way to the pill',
+    'the main view has room for the status message, and in a narrow list it goes before the name is cut',
     function()
-        local held = { name = 'a', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
+        local name = 'a-plugin-with-a-rather-long-name.nvim'
+        local held = { name = name, tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
         h.register({ held })
-        tasks.enqueue('a', held)
+        tasks.enqueue(name, held)
         tasks.run_all()
-        with_size(120, 40, function()
+        with_size(140, 40, function()
             h.ok(vim.wait(500, win_open), 'the window never opened')
-            h.ok(
-                vim.wait(500, function() return lines()[1]:find('installing · Rec', 1, true) end),
-                lines()[1]
-            )
+            h.ok(vim.wait(500, function() return lines()[1]:find('installing', 1, true) end), lines()[1])
+            h.ok(lines()[1]:find(name, 1, true), 'the name was cut: ' .. lines()[1])
             h.eq(ui._detail_winid ~= nil, true)
             in_view('split', function()
                 ui.open()
-                h.ok(lines()[1]:find('tasks ▶', 1, true), lines()[1])
+                local row = lines()[1]
+                h.ok(row:find('tasks ▶', 1, true), row)
                 h.ok(
-                    not lines()[1]:find('installing', 1, true),
-                    'half the window has no room for the message: ' .. lines()[1]
+                    not row:find('installing', 1, true),
+                    'half the window has no room for the message: ' .. row
                 )
+                h.ok(row:find('^ a%-plugin%-with.-… later'), 'the name was not cut to fit: ' .. row)
+                h.ok(vim.fn.strdisplaywidth(row) <= vim.api.nvim_win_get_config(ui._winid).width, row)
             end)
             release()
             h.ok(tasks.wait(2000))

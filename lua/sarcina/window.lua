@@ -83,10 +83,8 @@ local STEP_GROUP = {
     check = 'SarcinaStepCheck',
 }
 
-local NAME_MAX, NAME_MIN, TAG_W = 28, 10, 7
--- The load time sits in brackets after the name: `(0.6ms)` at most `(<0.1ms)`. The status message takes what is
--- left of the list after the other columns, so git's progress and a build's output show while they run.
-local TIME_COL = 8
+-- A name is cut to no less than this when the row has no room for it.
+local NAME_MIN = 10
 local KEY_W = 9
 -- The window takes 80% of the editor each way: a header across the top, a footer across the bottom, and
 -- between them the list and the details, which scroll. The view says how much of the width is the list's: 70% in
@@ -110,9 +108,6 @@ local view = {
     total_h = 0, -- the four windows stacked, borders included
     list_w = 0, -- inner width of the list
     detail_w = 0, -- inner width of the details, nil when there is no details pane
-    name_w = 0,
-    digits = 1, -- digits of the largest task count, so that every widget is as wide as the others
-    message = 0, -- columns left for the status message of a row
 }
 
 -- The header is two lines and the footer one, each with two borders.
@@ -223,13 +218,9 @@ end
 -- circle, one at work a triangle, and so on.
 local function pill_parts(task, tasks, state)
     local kind = 'SarcinaPill' .. PILL[state]
-    local digits = view.digits
     local parts = {}
     if M.rounded then table.insert(parts, { CAP_LEFT, kind .. 'Left' }) end
-    table.insert(
-        parts,
-        { string.format(' %' .. digits .. 'd/%' .. digits .. 'd ', task, tasks), kind .. 'Count' }
-    )
+    table.insert(parts, { string.format(' %d/%d ', task, tasks), kind .. 'Count' })
     table.insert(parts, { ' tasks ' .. GLYPH[state] .. ' ', kind })
     if M.rounded then table.insert(parts, { CAP_RIGHT, kind .. 'Right' }) end
     return parts
@@ -279,22 +270,23 @@ local function status_message(row)
     return row.state .. ' · ' .. detail
 end
 
--- A row: `name  (load time) when it loads, <done>/<all> tasks pill, status message`.
+-- A row: `name (load time) when it loads <done>/<all> tasks pill status message`, one space apart. The status
+-- message takes what is left of the list, so git's progress and a build's output show while they run. Without
+-- room for a few characters of it the message goes, and only then is the name cut.
 local function row_line(row)
     local time = format_time(row.duration)
-    local parts = {
-        { ' ' },
-        { pad(fit(row.name, view.name_w), view.name_w), 'SarcinaName' },
-        { '  ' },
-        { pad(time ~= '' and '(' .. time .. ')' or '', TIME_COL), 'SarcinaNote' },
-        { ' ' },
-        { pad(row.timing or '', TAG_W), 'SarcinaTag' },
-        { ' ' },
-    }
-    vim.list_extend(parts, pill_parts(row.task, row.tasks, row.state))
-    if view.message > 0 then
+    local after = {}
+    if time ~= '' then vim.list_extend(after, { { ' ' }, { '(' .. time .. ')', 'SarcinaNote' } }) end
+    if row.timing then vim.list_extend(after, { { ' ' }, { row.timing, 'SarcinaTag' } }) end
+    table.insert(after, { ' ' })
+    vim.list_extend(after, pill_parts(row.task, row.tasks, row.state))
+    local name = fit(row.name, math.max(view.list_w - 1 - parts_width(after), NAME_MIN))
+    local parts = { { ' ' }, { name, 'SarcinaName' } }
+    vim.list_extend(parts, after)
+    local left = view.list_w - parts_width(parts) - 1
+    if left >= 4 then
         table.insert(parts, { ' ' })
-        table.insert(parts, { fit(status_message(row), view.message), HL[row.state] })
+        table.insert(parts, { fit(status_message(row), left), HL[row.state] })
     end
     return build_line(parts)
 end
@@ -329,20 +321,9 @@ local function footer_lines()
     return { build_line({ { left, 'SarcinaFooter' }, { string.rep(' ', gap) }, { right, 'SarcinaFooter' } }) }
 end
 
--- Fixes the sizes and the columns from the rows and the editor: the window is 80% by 80% of the editor. With
--- room for it the details get a pane of their own; without it the list takes the whole width. The name column
--- shrinks when the list is narrow, and the status message is what is left after the other columns.
-local function measure(list)
-    local name_w, max_tasks = 0, 0
-    for _, row in ipairs(list) do
-        name_w = math.max(name_w, width_of(row.name))
-        max_tasks = math.max(max_tasks, row.tasks)
-    end
-    name_w = math.min(name_w, NAME_MAX)
-    view.digits = #tostring(max_tasks)
-    local pill_w = parts_width(pill_parts(max_tasks, max_tasks, 'loaded'))
-    local without_name = 1 + 2 + TIME_COL + 1 + TAG_W + 1 + pill_w
-
+-- Fixes the sizes from the editor: the window is 80% by 80% of it. With room for it the details get a pane of
+-- their own, as wide as the view says; without it the list takes the whole width.
+local function measure()
     local lines = vim.o.lines - vim.o.cmdheight
     view.outer_w = math.max(math.floor(vim.o.columns * SHARE), 20)
     view.outer_h = math.max(math.floor(lines * SHARE), 5)
@@ -356,11 +337,6 @@ local function measure(list)
     else
         view.list_w, view.detail_w = view.outer_w - 2, nil
     end
-
-    view.name_w = math.max(math.min(name_w, view.list_w - without_name), NAME_MIN)
-    -- Less than a few characters of message says nothing, so the column goes.
-    local left = view.list_w - without_name - view.name_w - 1
-    view.message = left >= 4 and left or 0
 
     -- The header and the footer take what they need, and the list and the details the rest.
     local chrome = HEADER_OUTER + FOOTER_OUTER
@@ -405,7 +381,7 @@ end
 function M.draw(bufs, list)
     list = list or stats.plugins()
     entries, line_of, rows, names = {}, {}, {}, {}
-    measure(list)
+    measure()
     local lines = {}
     for i, row in ipairs(list) do
         names[i] = row.name
