@@ -28,7 +28,7 @@ lua/sarcina/
 ├── pin.lua           what a spec pins a plugin to: a commit, a tag, a version range or a branch
 ├── updater.lua       :Sarcina check and :Sarcina update
 ├── schema.lua        manifest and task validation
-├── ui.lua            event bus, toasts, and when the window opens
+├── ui.lua            event bus, header messages, and when the window opens
 └── window.lua        the floating window: the plugin list and a pane with the details of one
 ```
 
@@ -262,7 +262,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 **`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. For a plugin that is somewhere else it fetches the commits after the one the plugin is at (`git fetch --shallow-since`), to list them, and leaves the checkout as it is. It runs outside the task list, so the rows keep their state, and its results go to the [Updates section](#updates) of the window; a message names the plugins that have an update. A check of named plugins keeps what an earlier check found for the others. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
 
-**`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`delete`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are skipped with `setup({ confirm = false })`.
+**`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`delete`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are asked in the header (see [Messages](#messages)) and skipped with `setup({ confirm = false })`.
 
 **`install`** reads your specs from disk and runs the plan of each plugin that has not loaded in this session: one that is not on disk is cloned (`Installing 1: …`), one that is on disk but did not load, such as a spec you just added, is loaded (`Loading 1: …`), and one a failure stopped before it loaded runs again. Each loads the way its spec says, now, later or on a trigger, so it works without a restart. A plugin that loaded, is waiting for its trigger, or is queued is left alone: its `config` does not run twice, and it does not move (that is `update`). A plugin whose `config` failed after it was on the runtimepath counts as loaded; restart Neovim to run it again.
 
@@ -306,13 +306,15 @@ Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.sn
 
 ## Window
 
-Four windows make one block, 80% of the editor wide and 80% tall, centered: a header across the top, a footer across the bottom, and between them the list of plugins on the left and the details of the one under the cursor on the right. The list and the details scroll; the header and the footer have windows of their own, so they stay in view.
+Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, see Heights), centered: a header across the top, a footer across the bottom, and between them the list of plugins on the left and the details of the one under the cursor on the right. The list and the details scroll; the header and the footer have windows of their own, so they stay in view.
 
 **Select view.** `v` in the list opens it: every row gets a checkbox, `○` and `✔` once picked, and `Space` picks or drops the plugin under the cursor. The footer lists the picks as pills, `Selected 2 ✔ cmp ✔ lsp`, and ends in `+N` when they do not all fit. The keys below then act on every pick, and leave the view when they do. `v` again leaves it and drops every pick. `Space` does nothing outside the view.
 
 **Keys.** In the list, a lowercase key acts on the plugin under the cursor, or on every plugin in a visual selection, so `Vjjd` deletes three at once. `c` checks, `u` updates, `i` installs, `l` loads and `d` deletes; each runs the command of the same name, so `u` and `d` ask first. `C` and `U` check and update every plugin.
 
 **Views.** In the `main` view the list takes 70% of the width and the details 30%, which leaves each row room for its status message: on a first install or a build you read git's progress, the build's output and any error as they come. `=` in the list switches to the `split` view, 50/50, for longer details, and back; the footer says what `=` switches to (`= 50/50` or `= 70/30`). The view stays for the rest of the session, and `setup({ ui = { view = 'split' } })` starts in `split`.
+
+**Heights.** The window is 80% of the editor tall (`regular`). `-` in the list makes it 95% tall (`extended`), and `-` again goes back. The header and the footer keep their size, so every extra row goes to the list and the details, for more plugins at once. It works with either view, stays for the session, and `setup({ ui = { height = 'extended' } })` starts tall.
 
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -339,7 +341,7 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
 ╰─── q close · = 50/50 · v select · ⏎ changelog · c/C check · u/U update · i install · l load · d delete ────╯
 ```
 
-**The header** has the total on the left, `Total: 6 plugins`, and on its right the work going on now: what kind (installing, updating, checking, building, or a background check for updates), how many of those jobs ended out of all of them, the plugin at it, a bar and a percentage. When nothing runs that side is empty. Below, on the left, are how many plugins loaded and how many did not, `● 3  ○ 3`; in the middle how far all their tasks have got together, `13/25 tasks`, the left numbers of the rows added up over their right numbers, so it counts up in real time; and on the right what the session did so far, each only once there is one: `⤓` plugins cloned, `⚙` builds that ran, `↑` updates that moved a plugin, `✕` plugin directories deleted, `✘` tasks that failed. **The footer** has on the left the picks of the select view, or `v to select plugins` when there is none, and the startup time on the right. On its bottom border, in the middle, are the keys of the list: `q` close, `=` the other view, `v` select, `⏎` changelog, `c`/`C` check, `u`/`U` update, `i` install, `l` load, `d` delete, `^d`/`^u` scroll the details; in the select view, the keys that act on the picks. A footer too narrow for all of them drops keys from the end. The counts per timing are in the section headers.
+**The header** has the total on the left, `Total: 6 plugins`, and on its right the work going on now: what kind (installing, updating, checking, building, or a background check for updates), how many of those jobs ended out of all of them, the plugin at it, a bar and a percentage. When nothing runs that side is empty. Below, on the left, are how many plugins loaded and how many did not, `● 3  ○ 3`; in the middle how far all their tasks have got together, `13/25 tasks`, the left numbers of the rows added up over their right numbers, so it counts up in real time; and on the right what the session did so far, each only once there is one: `⤓` plugins cloned, `⚙` builds that ran, `↑` updates that moved a plugin, `✕` plugin directories deleted, `✘` tasks that failed. **The footer** has on the left the picks of the select view, or `v to select plugins` when there is none, and the startup time on the right. On its bottom border, in the middle, are the keys of the list: `q` close, `=` the other view, `-` the other height, `v` select, `⏎` changelog, `c`/`C` check, `u`/`U` update, `i` install, `l` load, `d` delete, `^d`/`^u` scroll the details; in the select view, the keys that act on the picks. A footer too narrow for all of them drops keys from the end. The counts per timing are in the section headers.
 
 **The list** has a section per timing, `Now`, `Later` and `Triggered`, each under a header with its count (`Later (18)`) and a blank line before the next; a section with no plugins is left out. Within a section the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. The cursor rests only on rows of plugins: moving onto a header or a blank line takes it on, the way it moved, to the next plugin. The details always show the plugin of the row under the cursor, and nothing when there is none.
 
@@ -385,7 +387,7 @@ It opens by itself on a first install (a clone), on a build that runs because th
 | --- | --- |
 | `'auto'` (default) | on real work and on a failure |
 | `'always'` | at every startup |
-| `'never'` | never. Failures still toast |
+| `'never'` | never opens by itself. Messages are only kept (`require('sarcina.ui').messages()`); a question still opens it |
 
 A window that opened by itself closes `ui.close_delay` (3 s) after a clean run. A failure keeps it open. `q` or closing the list dismisses all four windows until a failure it has not shown yet, and `:Sarcina panel` brings it back, goes into the list, and keeps it open until you close it.
 
@@ -393,7 +395,15 @@ A load that a trigger starts updates the plugin's row in place, and `ui.on('task
 
 ## Messages
 
-Only problems become toasts. `setup()` runs quietly, so a clean launch prints nothing and the window carries the progress. A run with failures ends with one error line such as `2 done, 1 failed, 4 skipped`, counting only that run. `:Sarcina install` also prints a summary when it succeeds. The resolver's chatter, such as derived plugin names, goes out as `debug` events that only `ui.on('debug', fn)` listeners receive.
+### Messages
+
+Sarcina never uses `vim.notify`, the command line or a prompt. A line of work belongs to its plugin: the status message on the plugin's row. Everything else goes to the right of the header, on two lines:
+
+- **Line 1** is realtime: the kind of work going on, how many jobs of it ended, the plugin at it and a bar (`⤓ Installing 3/8 · telescope.nvim ███░░░░░░░  37%`).
+- **Line 2** is the last message: what a command says (`› Deleted 2: a, b`, `! Not installed: x`, `✘ 1 failed`), shown until the next one or for 8 s (24 s for an error). A message opens the window if it is closed, and the window closes again with it when nothing else keeps it open. The end-of-run count (`› 12 done`) is shown only if the window is open already.
+- **Questions** (`update`, `delete`) take both lines: `? Delete 2 plugins: a, b?` and under it the note and `[y] yes  [n] no`. The window opens and takes focus for it. `y` answers yes; `n`, `<Esc>` or closing the window answer no. `confirm = false` skips them.
+
+The left of the header counts the session as icon and number: `● 12` loaded, `○ 3` not loaded, then `⤓` installed, `⚙` built, `↑` updated, `✕` deleted and `✘` failed, each once there was one. `ui.messages()` returns every message of the session as `{ msg, level }`, and `ui.on('info' | 'warn' | 'error', fn)` listens to them. The resolver's chatter, such as derived plugin names, goes out as `debug` events that only `ui.on('debug', fn)` listeners receive.
 
 ## Development
 
@@ -404,3 +414,4 @@ luacheck lua plugin tests
 ```
 
 The tests use a throwaway XDG directory and local git repos, with no network. Set `SARCINA_TEST_FILTER` to a substring to run matching tests only.
+

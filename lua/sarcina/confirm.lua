@@ -8,10 +8,11 @@ M.enabled = true
 --- Read the `confirm` option of setup(): anything but `false` keeps the question.
 function M.configure(opt) M.enabled = opt ~= false end
 
---- Whether the user said yes. Always true with the question off. A function so tests can swap it.
-function M.ask(prompt)
-    if not M.enabled then return true end
-    return vim.fn.confirm(prompt, '&Yes\n&No', 2) == 1
+--- Calls `callback(true)` at once with the question off. Otherwise the question is asked in the right of the
+--- header (see ui.ask) and `callback` gets the answer later. A function so tests can swap it.
+function M.ask(prompt, callback)
+    if not M.enabled then return callback(true) end
+    require('sarcina.ui').ask(prompt, callback)
 end
 
 return M

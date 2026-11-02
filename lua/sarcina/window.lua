@@ -56,6 +56,7 @@ local HL_LINKS = {
     SarcinaName = 'Normal',
     SarcinaTag = 'Comment',
     SarcinaHeader = 'Title',
+    SarcinaBrand = 'Title',
     SarcinaFooter = 'Comment',
     SarcinaPickOn = 'DiagnosticOk',
     SarcinaPickOff = 'Comment',
@@ -98,6 +99,9 @@ local KEY_W = 9
 -- `main`, half in `split`. The details pane only exists when both panes have this much room.
 local SHARE, LIST_MIN, DETAIL_MIN = 0.8, 40, 28
 local VIEWS = { main = 0.7, split = 0.5 }
+-- The share of the editor's height the window takes. The header and the footer keep theirs, so the extra rows of
+-- `extended` all go to the list and the details.
+local HEIGHTS = { regular = SHARE, extended = 0.95 }
 
 local entries = {} -- line number -> { kind = 'plugin', name = string }
 local line_of = {} -- plugin name -> line number
@@ -128,6 +132,11 @@ M.rounded = true
 --- How the list and the details share the width: 'main' (70/30) or 'split' (50/50).
 M.view = 'main'
 
+--- The last message for the right of the header, `{ level, text }`, and the question waiting for an answer,
+--- `{ prompt }`. The UI sets them; the window only draws them.
+M.message = nil
+M.question = nil
+
 --- Whether the list is in the select view: a checkbox in front of every row, and the footer names the picks.
 M.select_mode = false
 
@@ -153,6 +162,18 @@ function M.toggle_changelog() M.changelog = not M.changelog end
 function M.toggle_view()
     M.view = M.view == 'main' and 'split' or 'main'
     return M.view
+end
+
+--- How tall the window is: 'regular' (80% of the editor) or 'extended' (95%, the extra rows for the list).
+M.height = 'regular'
+
+--- Whether `name` is a height.
+function M.is_height(name) return HEIGHTS[name] ~= nil end
+
+--- Switches between the two heights. Returns the height now in use.
+function M.toggle_height()
+    M.height = M.height == 'regular' and 'extended' or 'regular'
+    return M.height
 end
 
 -- How far a row of a section sits in from its header.
@@ -522,8 +543,9 @@ local function activity_parts()
     return parts
 end
 
--- What the session did so far, for the right of the header: clones, builds that ran, updates that moved a plugin,
--- deletes and failures, each only when there was one.
+-- What the session did so far, for the left of the header next to the loaded and not loaded counts: an icon and
+-- a number for the clones, the builds that ran, the updates that moved a plugin, the deletes and the failures,
+-- each only when there was one.
 local function totals_parts()
     local count = { install = 0, build = 0, update = 0, failed = 0 }
     for _, job in ipairs(require('sarcina.track').history()) do
@@ -539,24 +561,66 @@ local function totals_parts()
     end
     local parts = {}
     for _, total in ipairs({
-        { count.install, '⤓', 'installed', 'SarcinaDone' },
-        { count.build, '⚙', 'built', 'SarcinaStepBuild' },
-        { count.update, '↑', 'updated', 'SarcinaUpdate' },
-        { require('sarcina.installer').removed, '✕', 'deleted', 'SarcinaNote' },
-        { count.failed, '✘', 'failed', 'SarcinaFailed' },
+        { count.install, '⤓', 'SarcinaDone' },
+        { count.build, '⚙', 'SarcinaStepBuild' },
+        { count.update, '↑', 'SarcinaUpdate' },
+        { require('sarcina.installer').removed, '✕', 'SarcinaNote' },
+        { count.failed, '✘', 'SarcinaFailed' },
     }) do
         if total[1] > 0 then
-            if #parts > 0 then table.insert(parts, { '  ' }) end
-            table.insert(parts, { total[2] .. ' ' .. total[1], total[4] })
-            table.insert(parts, { ' ' .. total[3], 'SarcinaNote' })
+            table.insert(parts, { '  ' })
+            table.insert(parts, { total[2], total[3] })
+            table.insert(parts, { ' ' .. total[1], 'SarcinaStepTime' })
         end
     end
-    if #parts > 0 then table.insert(parts, { ' ' }) end
     return parts
 end
 
--- The header: the total and the work going on now, then how many plugins loaded and did not, how far all their
--- tasks have got in the middle, and what the session did.
+local MESSAGE = {
+    [vim.log.levels.INFO] = { '›', 'SarcinaName' },
+    [vim.log.levels.WARN] = { '!', 'SarcinaWaiting' },
+    [vim.log.levels.ERROR] = { '✘', 'SarcinaFailed' },
+}
+
+-- `text` as one line of the header's right side, cut to `room` columns. Nothing when there is no room.
+local function right_text(icon, text, group, room)
+    if room < 8 then return {} end
+    text = (text:gsub('%s*\n%s*', ' · '))
+    return { { icon .. ' ', group }, { fit(text, room - 3), group }, { ' ' } }
+end
+
+-- The right side of the two header lines, after the messages and questions the UI has for it. A question takes both
+-- lines: what is asked, then the rest of it and the keys. Realtime work goes on the first line while there is no
+-- question, and the last message on the second.
+local function right_side(used_first, used_second)
+    local room_first, room_second = view.full_w - used_first - 2, view.full_w - used_second - 2
+    if M.question then
+        local head, rest = M.question.prompt:match('^([^\n]*)\n?(.*)$')
+        local keys = '[y] yes  [n] no'
+        -- The keys always stay; the note before them is cut when there is no room.
+        local second = keys
+        if rest ~= '' then
+            local note = (rest:gsub('%s*\n%s*', ' · '))
+            second = fit(note, math.max(room_second - width_of(keys) - 5, 4)) .. '  ' .. keys
+        end
+        return right_text('?', head, 'SarcinaWaiting', room_first),
+            right_text('', second, 'SarcinaWaiting', room_second)
+    end
+    local first = activity_parts()
+    local second = {}
+    local message = M.message
+    if message then
+        local style = MESSAGE[message.level] or MESSAGE[vim.log.levels.INFO]
+        second = right_text(style[1], message.text, style[2], room_second)
+    end
+    return first, second
+end
+
+-- The header: the total and the work going on now, then how many plugins loaded and did not and what the session
+-- did, how far all their tasks have got in the middle, and the last message.
+-- The name in the middle of the first line of the header.
+local BRAND = { { 'Sarcina', 'SarcinaBrand' } }
+
 local function header_lines()
     local text = string.format(' Total: %d plugin%s', #names, #names == 1 and '' or 's')
     local task, tasks, loaded = 0, 0, 0
@@ -572,11 +636,19 @@ local function header_lines()
         { '○', 'SarcinaPending' },
         { ' ' .. (#names - loaded), 'SarcinaStepTime' },
     }
+    vim.list_extend(counts, totals_parts())
     local progress =
         { { tostring(task), 'SarcinaStepTime' }, { string.format('/%d tasks', tasks), 'SarcinaNote' } }
+    local function center_end(parts)
+        return math.floor((view.full_w - parts_width(parts)) / 2) + parts_width(parts)
+    end
+    local first, second = right_side(
+        math.max(width_of(text), center_end(BRAND)),
+        math.max(parts_width(counts), center_end(progress))
+    )
     return {
-        spread(view.full_w, { { text, 'SarcinaHeader' } }, nil, activity_parts()),
-        spread(view.full_w, counts, progress, totals_parts()),
+        spread(view.full_w, { { text, 'SarcinaHeader' } }, BRAND, first),
+        spread(view.full_w, counts, progress, second),
     }
 end
 
@@ -631,7 +703,7 @@ end
 local function measure()
     local lines = vim.o.lines - vim.o.cmdheight
     view.outer_w = math.max(math.floor(vim.o.columns * SHARE), 20)
-    view.outer_h = math.max(math.floor(lines * SHARE), 5)
+    view.outer_h = math.max(math.floor(lines * HEIGHTS[M.height]), 5)
     view.full_w = view.outer_w - 2
 
     local inner = view.outer_w - 4

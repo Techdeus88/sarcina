@@ -137,8 +137,8 @@ test('a running row shows its work, and the details show its output, until it is
         h.ok(vim.wait(500, function() return lines()[1]:find('loaded', 1, true) end), lines()[1])
         h.ok(lines()[1]:find('^   slow%s+.*later%s+.*2/2%s+tasks ✔.*loaded'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
-        -- Idle, the right of the second line says what the session did.
-        h.ok(header_all()[2]:find('⤓ 1 installed $'), header_all()[2])
+        -- The counts of what the session did sit on the left, after loaded and not loaded.
+        h.ok(header_all()[2]:find('^ ● 1  ○ 0  ⤓ 1'), header_all()[2])
     end)
 end)
 
@@ -429,6 +429,49 @@ test(
     end
 )
 
+test('- makes the window 95% tall and back, the extra rows all for the list and the details', function()
+    h.register({ loaded('a'), loaded('b') })
+    with_size(120, 40, function()
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        local function config(win) return vim.api.nvim_win_get_config(win) end
+        local function heights()
+            return {
+                config(ui._header_winid).height,
+                config(ui._winid).height,
+                config(ui._detail_winid).height,
+                config(ui._footer_winid).height,
+            }
+        end
+        local function footer_hint()
+            local text = config(ui._footer_winid).footer
+            return type(text) == 'table' and text[1][1] or text
+        end
+        -- 39 rows: 31 of them regular, 37 extended; the header (2) and the footer (1) stay as they are.
+        h.eq(heights(), { 2, 22, 22, 1 })
+        h.ok(footer_hint():find('- taller', 1, true), footer_hint())
+        vim.api.nvim_feedkeys('-', 'xt', false)
+        h.eq(window.height, 'extended')
+        h.eq(heights(), { 2, 28, 28, 1 })
+        h.ok(footer_hint():find('- shorter', 1, true), footer_hint())
+        local header, footer_win = config(ui._header_winid), config(ui._footer_winid)
+        h.eq(footer_win.row + footer_win.height + 2 - header.row, 37)
+        h.ok(math.abs(2 * header.row + 37 - 39) <= 1, 'not centered down')
+        -- The widths and the view do not change.
+        h.eq({ config(ui._winid).width, config(ui._detail_winid).width }, { 64, 28 })
+        vim.api.nvim_feedkeys('-', 'xt', false)
+        h.eq({ window.height, heights() }, { 'regular', { 2, 22, 22, 1 } })
+    end)
+end)
+
+test('ui.height picks how tall the window opens, and an unknown one warns and uses regular', function()
+    ui.configure({ height = 'extended' })
+    h.eq(window.height, 'extended')
+    ui.configure({ height = 'huge' })
+    h.eq(window.height, 'regular')
+    h.ok(h.notified('Unknown ui.height huge, using regular'), vim.inspect(h.notes))
+end)
+
 test('ui.view picks the view the window opens in, and an unknown one warns and uses main', function()
     ui.configure({ view = 'split' })
     h.eq(window.view, 'split')
@@ -530,8 +573,8 @@ test('below the total the header shows how far all the tasks have got, centered'
         local got = header_all()
         h.eq(#got, 2)
         h.eq(got[1], ' Total: 3 plugins')
-        -- Loaded and not loaded on the left, the tasks in the middle, nothing done on the right.
-        h.ok(got[2]:find('^ ● 2  ○ 1%s+4/6 tasks$'), got[2])
+        -- Loaded and not loaded on the left, the tasks in the middle.
+        h.ok(got[2]:find('^ ● 2  ○ 1%s+4/6 tasks'), got[2])
         local width = vim.api.nvim_win_get_config(ui._header_winid).width
         local at = got[2]:find('4/6 tasks', 1, true)
         h.eq(vim.fn.strdisplaywidth(got[2]:sub(1, at - 1)), math.floor((width - #'4/6 tasks') / 2))
@@ -543,7 +586,8 @@ test('below the total the header shows how far all the tasks have got, centered'
             { 1, -1 },
             { details = true }
         )
-        h.eq(vim.tbl_map(function(mark) return mark[4].hl_group end, marks), {
+        -- The run's own "4 done" sits at the end of the line, so only the counts and the tasks are compared.
+        h.eq(vim.list_slice(vim.tbl_map(function(mark) return mark[4].hl_group end, marks), 1, 6), {
             'SarcinaDone',
             'SarcinaStepTime',
             'SarcinaPending',
@@ -565,7 +609,7 @@ test('the footer names every key in its middle, and drops keys from the end when
         h.eq(vim.api.nvim_win_get_config(ui._footer_winid).footer_pos, 'center')
         h.eq(
             hint_text(),
-            ' q close · = 50/50 · v select · ⏎ changelog · c/C check · u/U update · i install · l load · d delete · ^d/^u scroll '
+            ' q close · = 50/50 · - taller · v select · ⏎ changelog · c/C check · u/U update · i install · l load · d delete · ^d/^u scroll '
         )
         vim.api.nvim_set_current_win(ui._winid)
         vim.api.nvim_feedkeys('v', 'xt', false)
@@ -576,7 +620,7 @@ test('the footer names every key in its middle, and drops keys from the end when
         ui.open()
         local width = vim.api.nvim_win_get_config(ui._footer_winid).width
         h.ok(vim.fn.strdisplaywidth(hint_text()) <= width - 4, hint_text())
-        h.ok(vim.startswith(hint_text(), ' q close · = 50/50 · v select'), hint_text())
+        h.ok(vim.startswith(hint_text(), ' q close · = 50/50 · - taller · v select'), hint_text())
         h.ok(not hint_text():find('scroll', 1, true), hint_text())
     end)
 end)
@@ -588,7 +632,10 @@ test('the header counts what the session deleted', function()
     with_size(200, 50, function()
         ui.open()
         require('sarcina.installer').remove({ 'gone-a', 'gone-b' })
-        h.ok(vim.wait(500, function() return header_all()[2]:find('✕ 2 deleted $') end), header_all()[2])
+        h.ok(
+            vim.wait(500, function() return header_all()[2]:find('^ ● %d+  ○ %d+  ✕ 2') end),
+            header_all()[2]
+        )
     end)
 end)
 
@@ -1277,6 +1324,66 @@ test('the action keys act on the picks of the select view, and leave it', functi
     end)
     cli.dispatch = dispatch
     h.eq(sent, { { 'update', 'pa', 'pc' } })
+end)
+
+test('a message shows in the right of the header, opens the window, and is never a notification', function()
+    h.register({ loaded('a') })
+    with_size(200, 50, function()
+        ui.emit('warn', 'Not installed: ghost.nvim')
+        h.ok(vim.wait(500, function() return ui._header_winid ~= nil end), 'the window did not open')
+        local function second() return header_all()[2] end
+        h.ok(vim.wait(500, function() return second():find('! Not installed: ghost.nvim', 1, true) end), second())
+        ui.emit('info', 'Everything is up to date')
+        h.ok(vim.wait(500, function() return second():find('› Everything is up to date', 1, true) end), second())
+    end)
+    h.eq(h.stray, {})
+    h.ok(h.notified('Not installed: ghost.nvim'))
+end)
+
+test(
+    'a question is asked in the header, y answers yes, n and Esc answer no, and nothing is a prompt',
+    function()
+        h.register({ loaded('a') })
+        local confirm = require('sarcina.confirm')
+        confirm.enabled = true
+        local function ask_and_press(key)
+            local answer
+            confirm.ask(
+                'Delete 1 plugin: a?\nStill in your specs, so it installs again at the next startup: a',
+                function(yes) answer = yes end
+            )
+            h.ok(vim.wait(500, function() return ui._header_winid ~= nil end))
+            h.eq(vim.api.nvim_get_current_win(), ui._winid)
+            h.ok(header_all()[1]:find('? Delete 1 plugin: a?', 1, true), header_all()[1])
+            h.ok(header_all()[2]:find('[y] yes  [n] no', 1, true), header_all()[2])
+            vim.api.nvim_feedkeys(vim.keycode(key), 'xt', false)
+            return answer
+        end
+        with_size(200, 50, function()
+            h.eq(ask_and_press('y'), true)
+            h.eq(ask_and_press('n'), false)
+            h.eq(ask_and_press('<Esc>'), false)
+            h.eq(ui._question, nil)
+            h.ok(not header_all()[2]:find('[y] yes', 1, true), header_all()[2])
+        end)
+        confirm.enabled = false
+        h.eq(h.stray, {})
+    end
+)
+
+test('closing the window answers a waiting question with no', function()
+    h.register({ loaded('a') })
+    local confirm = require('sarcina.confirm')
+    confirm.enabled = true
+    local answer
+    with_size(200, 50, function()
+        confirm.ask('Update 1 plugin?', function(yes) answer = yes end)
+        h.ok(vim.wait(500, function() return ui._winid ~= nil end))
+        ui.close()
+        h.ok(vim.wait(500, function() return answer ~= nil end), 'the question was left open')
+    end)
+    h.eq(answer, false)
+    confirm.enabled = false
 end)
 
 return tests

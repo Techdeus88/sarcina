@@ -40,14 +40,16 @@ function M.run(resolved, names)
             .. '\nStill in your specs, so it installs again at the next startup: '
             .. table.concat(kept, ', ')
     end
-    if not confirm.ask(prompt) then return ui.emit('info', 'Nothing deleted') end
-    local removed, failed = installer.remove(picked)
-    if #removed > 0 then
-        ui.emit('info', string.format('Deleted %d: %s', #removed, table.concat(removed, ', ')))
-    end
-    for _, failure in ipairs(failed) do
-        ui.emit('error', failure.name .. ': ' .. failure.why)
-    end
+    confirm.ask(prompt, function(yes)
+        if not yes then return ui.emit('info', 'Nothing deleted') end
+        local removed, failed = installer.remove(picked)
+        if #removed > 0 then
+            ui.emit('info', string.format('Deleted %d: %s', #removed, table.concat(removed, ', ')))
+        end
+        for _, failure in ipairs(failed) do
+            ui.emit('error', failure.name .. ': ' .. failure.why)
+        end
+    end)
 end
 
 return M

@@ -8,14 +8,16 @@ M.notes = {}
 local registered = {}
 local size -- the editor's columns and lines before the first test, which every test starts from
 
---- Point every XDG dir at a throwaway root and capture vim.notify.
+--- Point every XDG dir at a throwaway root, and catch any stray vim.notify.
 function M.setup_env()
     local root = vim.fn.tempname()
     for _, name in ipairs({ 'DATA', 'CACHE', 'STATE', 'CONFIG' }) do
         vim.env['XDG_' .. name .. '_HOME'] = root .. '/' .. name:lower()
     end
+    -- Sarcina never notifies: its messages go to the header (ui.messages). Anything here is a stray.
+    M.stray = {}
     ---@diagnostic disable-next-line: duplicate-set-field
-    vim.notify = function(msg, level) table.insert(M.notes, { msg = msg, level = level }) end
+    vim.notify = function(msg, level) table.insert(M.stray, { msg = msg, level = level }) end
 end
 
 --- Clear task, UI and notification state between tests.
@@ -23,6 +25,11 @@ function M.reset()
     size = size or { vim.o.columns, vim.o.lines }
     vim.o.columns, vim.o.lines = size[1], size[2]
     M.notes = {}
+    M.stray = {}
+    local ui_module = require('sarcina.ui')
+    ui_module._messages = M.notes
+    ui_module._question = nil
+    require('sarcina.window').message, require('sarcina.window').question = nil, nil
     registered = {}
     local tasks = require('sarcina.tasks')
     tasks._jobs, tasks._plugins, tasks._order = {}, {}, {}
@@ -54,6 +61,7 @@ function M.reset()
     require('sarcina.checker')._reset()
     require('sarcina.installer').removed = 0
     require('sarcina.window').changelog = false
+    require('sarcina.window').height = 'regular'
     ui.close_delay = 60000
 end
 

@@ -151,7 +151,7 @@ end)
 test('a normal run toasts one summary line', function()
     h.run({ { name = 'p', tasks = { h.lua('a', h.noop) } } })
     h.eq(#h.notes, 1)
-    h.eq(h.notes[1].msg, '[Sarcina] 1 done')
+    h.eq(h.notes[1].msg, '1 done')
 end)
 
 test('a quiet run toasts nothing when clean and one line when it fails', function()
@@ -259,7 +259,7 @@ end)
 test('the end-of-run summary reports failures at error level', function()
     h.run({ failing('p') })
     local last = h.notes[#h.notes]
-    h.eq(last.msg, '[Sarcina] 0 done, 1 failed')
+    h.eq(last.msg, '0 done, 1 failed')
     h.eq(last.level, vim.log.levels.ERROR)
 end)
 

@@ -248,8 +248,10 @@ function M.update(resolved, names)
             #moving == 1 and '' or 's',
             table.concat(lines, '\n')
         )
-        if not confirm.ask(prompt) then return ui.emit('info', 'Nothing updated') end
-        run('update', resolved, moving)
+        confirm.ask(prompt, function(yes)
+            if not yes then return ui.emit('info', 'Nothing updated') end
+            run('update', resolved, moving)
+        end)
     end)
 end
 

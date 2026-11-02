@@ -4,7 +4,8 @@
 -- room, a pane with the details of the selected one, and a footer. The list and the details scroll; the
 -- header and the footer have windows of their own so they stay in view. This module decides when it opens
 -- and which plugins to redraw, owns the four windows, and keeps no task state of its own.
--- Events: "info" | "warn" | "warning" | "error" (strings, shown as toasts), "debug" (string, listeners only),
+-- Events: "info" | "warn" | "warning" | "error" (strings, shown in the right of the header; never as a
+-- notification or in the command line), "debug" (string, listeners only),
 -- "task" (job), "start", "done" (summary), "updates" (the state of checker.lua).
 
 local M = {}
@@ -16,6 +17,9 @@ M.show = 'auto'
 M.check_on_open = true
 
 M._listeners = {}
+M._messages = {} -- every message of the session, as { msg, level }, for tests and for ui.messages()
+M._question = nil -- { prompt, callback } while the header waits for y or n
+M.message_ttl = 8000 -- how long a message stays in the header, ms; an error stays three times as long
 M._bufnr = nil -- the list
 M._winid = nil
 M._detail_bufnr = nil
@@ -89,19 +93,27 @@ function M.configure(opts)
         view = 'main'
     end
     window().view = view
+    local height = opts and opts.height or 'regular'
+    if not window().is_height(height) then
+        M.emit('warning', string.format('Unknown ui.height %s, using regular', tostring(height)))
+        height = 'regular'
+    end
+    window().height = height
     M.check_on_open = not opts or opts.check_on_open ~= false
 end
 
--- The keys the footer names. `=` says which view it switches to.
+-- The keys the footer names. `=` and `-` say which view and which height they switch to.
 -- The keys, for the footer, in the order they are dropped from the end when the footer is too narrow for all.
 local function hint()
     local keys
+    if M._question then return ' y yes · n no ' end
     if window().select_mode then
         keys = { 'v done', '␣ pick', 'c u i l d act on picks', 'q close', '^d/^u scroll' }
     else
         keys = {
             'q close',
             '= ' .. (window().view == 'main' and '50/50' or '70/30'),
+            '- ' .. (window().height == 'regular' and 'taller' or 'shorter'),
             'v select',
             '⏎ changelog',
             'c/C check',
@@ -302,6 +314,12 @@ local function ensure_buffer()
         function() M.toggle_view() end,
         { buffer = M._bufnr, nowait = true, desc = 'Switch the Sarcina view between 70/30 and 50/50' }
     )
+    vim.keymap.set(
+        'n',
+        '-',
+        function() M.toggle_height() end,
+        { buffer = M._bufnr, nowait = true, desc = 'Switch the Sarcina window between 80% and 95% tall' }
+    )
     vim.keymap.set('n', '<CR>', function()
         window().toggle_changelog()
         show_details()
@@ -311,6 +329,11 @@ local function ensure_buffer()
         desc = 'Show the changelog of a Sarcina update, or its tasks',
     })
     map_actions(M._bufnr)
+    for key, yes in pairs({ y = true, n = false, ['<Esc>'] = false }) do
+        vim.keymap.set('n', key, function()
+            if M._question then M._answer(yes) end
+        end, { buffer = M._bufnr, nowait = true, desc = 'Answer the question in the Sarcina header' })
+    end
     vim.keymap.set(
         'n',
         'v',
@@ -379,6 +402,7 @@ local function open_window(enter)
             M._pinned = false
             close_panes()
             window().closed()
+            if M._question then vim.schedule(function() M._answer(false) end) end
         end,
     })
     M._seen_failed = snapshot().counts.failed
@@ -454,7 +478,15 @@ function M._on_done(summary)
     local text = string.format('%d done', summary.done)
     if summary.failed > 0 then text = text .. string.format(', %d failed', summary.failed) end
     if summary.skipped > 0 then text = text .. string.format(', %d skipped', summary.skipped) end
-    if summary.failed > 0 or not summary.quiet then M.emit(summary.failed > 0 and 'error' or 'info', text) end
+    if summary.failed > 0 then
+        M.emit('error', text)
+    elseif not summary.quiet then
+        -- The count of a clean run is shown if the window is open, and does not open it.
+        M._on_message(vim.log.levels.INFO, text, true)
+        for _, fn in ipairs(M._listeners) do
+            pcall(fn, 'info', text)
+        end
+    end
     -- Failures from earlier in the session keep the window open, whichever run this was.
     if snapshot().counts.failed == 0 and not M._pinned then
         vim.defer_fn(function()
@@ -463,11 +495,63 @@ function M._on_done(summary)
     end
 end
 
+-- A message for the right of the header: it is kept, shown until the next one or until it times out, and it opens
+-- the window like real work does. With `show = 'never'` it is only kept (see `messages`).
+function M._on_message(level, text, passive)
+    local message = { level = level, text = text }
+    table.insert(M._messages, { msg = text, level = level })
+    window().message = message
+    M._want = M._want or not passive
+    schedule_flush()
+    local ttl = M.message_ttl * (level == vim.log.levels.ERROR and 3 or 1)
+    vim.defer_fn(function()
+        if window().message ~= message then return end
+        window().message = nil
+        schedule_flush()
+        -- A window a message opened by itself goes away with the message, unless there is work or a question.
+        vim.defer_fn(function()
+            local busy = M._pinned or M._question or require('sarcina.tasks').has_active()
+            if win_valid() and not busy and snapshot().counts.failed == 0 then M.close() end
+        end, M.close_delay)
+    end, ttl)
+end
+
+--- Every message of the session in order, as `{ msg, level }`.
+function M.messages() return M._messages end
+
+--- Asks a yes or no in the header and calls `callback(true | false)` once: `y` is yes, `n`, `<Esc>` or closing the
+--- window is no. The window opens and takes focus for it, whatever `show` says. Asking while a question is open
+--- answers that one with no first.
+function M.ask(prompt, callback)
+    if M._question then M._answer(false) end
+    M._question = { prompt = prompt, callback = callback }
+    window().question = { prompt = prompt }
+    M._dismissed = false
+    if win_valid() then
+        window().draw(buffers())
+        vim.api.nvim_set_current_win(M._winid)
+        follow(false, true)
+    else
+        open_window(true)
+    end
+end
+
+function M._answer(yes)
+    local question = M._question
+    if not question then return end
+    M._question, window().question = nil, nil
+    if win_valid() then
+        window().draw(buffers())
+        follow(false, true)
+    end
+    question.callback(yes)
+end
+
 -- Emit an event. `payload` is a string for info/warn/error/debug, a job for "task", a summary for "done".
 function M.emit(event, payload)
     local level = LEVELS[event]
     if level then
-        vim.notify('[Sarcina] ' .. tostring(payload), level)
+        M._on_message(level, tostring(payload))
     elseif event == 'task' then
         M._on_task(payload)
     elseif event == 'start' then
@@ -545,6 +629,16 @@ function M.toggle_view()
     if pane_valid('footer') then
         vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'center' })
     end
+    follow(false, true)
+end
+
+--- Switches the window between its heights, regular (80% of the editor) and extended (95%, the extra rows for
+--- the list and the details), and redraws it when it is open. The height stays for the rest of the session.
+function M.toggle_height()
+    window().toggle_height()
+    if not win_valid() then return end
+    window().draw(buffers())
+    apply_config()
     follow(false, true)
 end
 

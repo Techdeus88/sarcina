@@ -246,9 +246,9 @@ local function with_question(answer, fn)
     local confirm = require('sarcina.confirm')
     local ask, prompts = confirm.ask, {}
     confirm.enabled = true
-    confirm.ask = function(prompt)
+    confirm.ask = function(prompt, callback)
         table.insert(prompts, prompt)
-        return answer
+        callback(answer)
     end
     local ok, err = pcall(fn)
     confirm.ask, confirm.enabled = ask, false
