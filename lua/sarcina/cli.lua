@@ -120,7 +120,7 @@ function subcommands.sync(_, args)
 end
 
 function subcommands.check(_, args)
-    require('sarcina.updater').check(resolve_manifest(), vim.list_slice(args.fargs, 2))
+    require('sarcina.updater').look(resolve_manifest(), vim.list_slice(args.fargs, 2))
 end
 
 function subcommands.update(_, args)

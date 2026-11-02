@@ -53,6 +53,23 @@ function M.snapshot()
     return { jobs = M._jobs, counts = counts, total = #M._jobs }
 end
 
+--- Drop the jobs and the record of the plugins `names`, which a delete took out of the session.
+function M.forget(names)
+    local gone = {}
+    for _, name in ipairs(names) do
+        gone[name], M._plugins[name] = true, nil
+    end
+    local jobs, counted = {}, 0
+    for i, job in ipairs(M._jobs) do
+        if not gone[job.plugin] then
+            table.insert(jobs, job)
+            if i <= M._counted then counted = counted + 1 end
+        end
+    end
+    M._jobs, M._counted = jobs, counted
+    M._order = vim.tbl_filter(function(name) return not gone[name] end, M._order)
+end
+
 function M.plugin_failed(name)
     local plugin = M._plugins[name]
     return plugin ~= nil and plugin.failed == true

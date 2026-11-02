@@ -45,6 +45,11 @@ function M.reset()
     ui._seen_failed = 0
     ui._dirty, ui._want, ui._full = {}, false, false
     ui.show = 'auto'
+    -- A test that wants the window to look for updates when it opens says so.
+    ui.check_on_open = false
+    ui._check_after_run = false
+    require('sarcina.checker')._reset()
+    require('sarcina.window').changelog = false
     ui.close_delay = 60000
 end
 

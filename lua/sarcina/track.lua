@@ -68,6 +68,18 @@ function M.records(origin)
     return records
 end
 
+--- Forget every job of the plugins `names`, so nothing in the session knows they ever ran.
+function M.forget(names)
+    local gone = {}
+    for _, name in ipairs(names) do
+        gone[name], by_plugin[name] = true, nil
+    end
+    local function kept(list)
+        return vim.tbl_filter(function(job) return not gone[job.plugin] end, list)
+    end
+    history, ended = kept(history), kept(ended)
+end
+
 --- Forget the history. For tests.
 function M._reset()
     history, by_plugin, ended = {}, {}, {}

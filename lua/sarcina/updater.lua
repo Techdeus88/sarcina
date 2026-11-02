@@ -149,6 +149,73 @@ end
 --- Fetch what the remote of each plugin has, and say which have an update. `names` picks plugins, none picks all.
 function M.check(resolved, names) run('check', resolved, names or {}) end
 
+-- What a finished look says about `entries`, and at what level: the plugins with an update and the ones whose
+-- remote could not say.
+local function look_summary(state, entries)
+    local found, failed = {}, {}
+    for _, entry in ipairs(entries) do
+        local info, why = state.updates[entry.name], state.failed[entry.name]
+        if info then
+            table.insert(
+                found,
+                string.format('%s %s → %s', entry.name, info.from:sub(1, 7), info.to:sub(1, 7))
+            )
+        elseif why then
+            table.insert(failed, entry.name .. ' (' .. why .. ')')
+        end
+    end
+    local parts = {}
+    if #found > 0 then
+        table.insert(
+            parts,
+            string.format('%d update%s available: ', #found, #found == 1 and '' or 's')
+                .. table.concat(found, ', ')
+                .. '.'
+        )
+        table.insert(parts, 'Run :Sarcina update.')
+    elseif #failed == 0 then
+        table.insert(parts, 'Everything is up to date.')
+    end
+    if #failed > 0 then table.insert(parts, 'Failed: ' .. table.concat(failed, ', ') .. '.') end
+    return table.concat(parts, ' '), #failed > 0 and 'warn' or 'info'
+end
+
+--- Look for updates in the background (see checker.lua), without the task list: the window lists them in its
+--- Updates section, and a message says which plugins have one when it is done. Nothing moves. `names` picks
+--- plugins, none picks all; a look at some keeps what an earlier one found for the others.
+function M.look(resolved, names)
+    names = names or {}
+    local picked = select(resolved, names)
+    if not picked then return end
+    local checker = require('sarcina.checker')
+    if checker.state().running then return ui.emit('info', 'Already checking for updates') end
+    local wanted, missing, local_plugins = {}, {}, {}
+    for _, entry in ipairs(picked) do
+        if entry.spec.dir then
+            table.insert(local_plugins, entry.name)
+        elseif installed(entry) then
+            table.insert(wanted, entry)
+        else
+            table.insert(missing, entry.name)
+        end
+    end
+    if #missing > 0 then
+        ui.emit(
+            'warn',
+            'Not installed, so not checked: ' .. table.concat(missing, ', ') .. '. Run :Sarcina install.'
+        )
+    end
+    if #local_plugins > 0 and #names > 0 then
+        ui.emit('warn', 'Local plugins are not checked: ' .. table.concat(local_plugins, ', ') .. '.')
+    end
+    if #wanted == 0 then return end
+    ui.emit('info', string.format('Checking %d plugin%s...', #wanted, #wanted == 1 and '' or 's'))
+    checker.run(wanted, function(state)
+        local text, level = look_summary(state, wanted)
+        ui.emit(level, text)
+    end, { keep = #names > 0 })
+end
+
 -- The plugins a finished check found a newer commit for, with what to say about each.
 local function available(jobs)
     local names, lines = {}, {}

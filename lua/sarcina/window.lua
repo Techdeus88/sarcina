@@ -68,6 +68,11 @@ local HL_LINKS = {
     SarcinaStepUpdate = 'Number',
     SarcinaStepCheck = 'PreProc',
     SarcinaStepOther = 'Normal',
+    SarcinaSection = 'Function',
+    SarcinaUpdate = 'DiagnosticInfo',
+    SarcinaRev = 'Constant',
+    SarcinaCommit = 'Special',
+    SarcinaBreaking = 'DiagnosticError',
 }
 -- Each task of a plan has a colour of its own in the details, so the lines stand out from each other.
 local STEP_GROUP = {
@@ -120,14 +125,32 @@ M.rounded = true
 --- How the list and the details share the width: 'main' (70/30) or 'split' (50/50).
 M.view = 'main'
 
+--- Whether the details show the changelog of a plugin that has an update, instead of its tasks.
+M.changelog = false
+
+local function checker() return require('sarcina.checker') end
+
+-- The list has a section per timing, in this order, each with its plugins in the order they loaded.
+local SECTIONS = {
+    { timing = 'now', title = 'Now' },
+    { timing = 'later', title = 'Later' },
+    { timing = 'trigger', title = 'Triggered' },
+}
+
 --- Whether `name` is a view.
 function M.is_view(name) return VIEWS[name] ~= nil end
+
+--- Switches the details between the tasks of a plugin and, for one with an update, its changelog.
+function M.toggle_changelog() M.changelog = not M.changelog end
 
 --- Switches between the two views. Returns the view now in use.
 function M.toggle_view()
     M.view = M.view == 'main' and 'split' or 'main'
     return M.view
 end
+
+-- How far a row of a section sits in from its header.
+local INDENT = '   '
 
 local CAP_LEFT, CAP_RIGHT = vim.fn.nr2char(0xe0b6), vim.fn.nr2char(0xe0b4)
 
@@ -280,8 +303,8 @@ local function row_line(row)
     if row.timing then vim.list_extend(after, { { ' ' }, { row.timing, 'SarcinaTag' } }) end
     table.insert(after, { ' ' })
     vim.list_extend(after, pill_parts(row.task, row.tasks, row.state))
-    local name = fit(row.name, math.max(view.list_w - 1 - parts_width(after), NAME_MIN))
-    local parts = { { ' ' }, { name, 'SarcinaName' } }
+    local name = fit(row.name, math.max(view.list_w - #INDENT - parts_width(after), NAME_MIN))
+    local parts = { { INDENT }, { name, 'SarcinaName' } }
     vim.list_extend(parts, after)
     local left = view.list_w - parts_width(parts) - 1
     if left >= 4 then
@@ -289,6 +312,128 @@ local function row_line(row)
         table.insert(parts, { fit(status_message(row), left), HL[row.state] })
     end
     return build_line(parts)
+end
+
+local function short(commit) return commit:sub(1, 7) end
+
+local function plural(count, word) return count .. ' ' .. word .. (count == 1 and '' or 's') end
+
+local function breaking_count(commits)
+    local count = 0
+    for _, commit in ipairs(commits or {}) do
+        if commit.breaking then count = count + 1 end
+    end
+    return count
+end
+
+-- A section header: its title and how many lines it holds, then `extra` parts.
+local function section_line(title, count, extra)
+    local parts = { { ' ' }, { string.format('%s (%d)', title, count), 'SarcinaSection' } }
+    return build_line(vim.list_extend(parts, extra or {}))
+end
+
+-- What the Updates header says after its count: that a check runs, that nothing was found, how many remotes
+-- could not say, and the key for the changelog.
+local function updates_note(check, found)
+    local parts = {}
+    if check.running then
+        table.insert(parts, { '  ↻ checking…', 'SarcinaNote' })
+    elseif found == 0 then
+        table.insert(parts, { '  ✔ up to date', 'SarcinaDone' })
+    end
+    local failed = vim.tbl_count(check.failed)
+    if failed > 0 then
+        table.insert(parts, { '  ' .. plural(failed, 'remote') .. ' failed', 'SarcinaFailed' })
+    end
+    if found > 0 then table.insert(parts, { '  <CR> changelog', 'SarcinaNote' }) end
+    return parts
+end
+
+-- What an update says after the commit it goes to: how far behind the plugin is and how many of those commits
+-- break something.
+local function behind(info)
+    if not info.commits then return { { ' · update available' } } end
+    if #info.commits == 0 then return { { ' · moves back' } } end
+    local parts = { { ' · ' .. plural(#info.commits, 'commit') .. ' behind' } }
+    local broken = breaking_count(info.commits)
+    if broken > 0 then table.insert(parts, { '  △ ' .. broken .. ' breaking', 'SarcinaBreaking' }) end
+    return parts
+end
+
+-- A row of the Updates section: `↑ name commit subject · N commits behind  △ N breaking`. The subject of the
+-- newest commit takes what is left of the list, and goes when that is too little to say anything.
+local function update_line(name, info)
+    local head = {
+        { INDENT },
+        { '↑ ', 'SarcinaUpdate' },
+        { name, 'SarcinaName' },
+        { ' ' },
+        { short(info.to), 'SarcinaRev' },
+    }
+    local tail = behind(info)
+    local newest = info.commits and info.commits[1]
+    local room = view.list_w - parts_width(head) - parts_width(tail) - 1
+    if newest and room >= 8 then table.insert(head, { ' ' .. fit(newest.subject, room), 'SarcinaCommit' }) end
+    return build_line(vim.list_extend(head, tail))
+end
+
+-- The rows of `list` grouped by section, each group in the order of `list`. A row with no known timing is later.
+local function grouped(list)
+    local by_timing = {}
+    for _, section in ipairs(SECTIONS) do
+        by_timing[section.timing] = {}
+    end
+    for _, row in ipairs(list) do
+        table.insert(by_timing[row.timing] or by_timing.later, row)
+    end
+    return by_timing
+end
+
+-- The names of `list` in the order the sections show them.
+local function shown_order(list)
+    local order, by_timing = {}, grouped(list)
+    for _, section in ipairs(SECTIONS) do
+        for _, row in ipairs(by_timing[section.timing]) do
+            table.insert(order, row.name)
+        end
+    end
+    return order
+end
+
+-- The lines of the list: an Updates section while a check runs or after one that had something to check, then a
+-- section per timing. Sections are a blank line apart. Fills `entries`, `line_of`, `rows` and `names`.
+local function layout(list)
+    local lines = {}
+    local function add(line, entry)
+        table.insert(lines, line)
+        entries[#lines] = entry
+    end
+    local check = checker().state()
+    local found = {}
+    for _, row in ipairs(list) do
+        if check.updates[row.name] then table.insert(found, row.name) end
+    end
+    if check.running or check.total > 0 then
+        add(section_line('Updates', #found, updates_note(check, #found)), { kind = 'section' })
+        for _, name in ipairs(found) do
+            add(update_line(name, check.updates[name]), { kind = 'update', name = name })
+        end
+    end
+    local by_timing = grouped(list)
+    for _, section in ipairs(SECTIONS) do
+        local members = by_timing[section.timing]
+        if #members > 0 then
+            if #lines > 0 then add(build_line({}), { kind = 'blank' }) end
+            add(section_line(section.title, #members), { kind = 'section' })
+            for _, row in ipairs(members) do
+                table.insert(names, row.name)
+                rows[row.name] = row
+                add(row_line(row), { kind = 'plugin', name = row.name })
+                line_of[row.name] = #lines
+            end
+        end
+    end
+    return lines
 end
 
 local function header_lines()
@@ -382,14 +527,7 @@ function M.draw(bufs, list)
     list = list or stats.plugins()
     entries, line_of, rows, names = {}, {}, {}, {}
     measure()
-    local lines = {}
-    for i, row in ipairs(list) do
-        names[i] = row.name
-        rows[row.name] = row
-        line_of[row.name] = i
-        entries[i] = { kind = 'plugin', name = row.name }
-        lines[i] = row_line(row)
-    end
+    local lines = layout(list)
     vim.api.nvim_buf_clear_namespace(bufs.list, NS, 0, -1)
     put(bufs.list, NS, 1, vim.api.nvim_buf_line_count(bufs.list), #lines > 0 and lines or { build_line({}) })
     put_chrome(bufs)
@@ -401,9 +539,10 @@ end
 --- when it drew everything.
 function M.refresh(bufs, dirty)
     local list = stats.plugins()
-    local same = #list == #names
-    for i, row in ipairs(list) do
-        same = same and names[i] == row.name
+    local order = shown_order(list)
+    local same = #order == #names
+    for i, name in ipairs(order) do
+        same = same and names[i] == name
     end
     if not same then
         M.draw(bufs, list)
@@ -475,7 +614,7 @@ function M.selected() return selected end
 --- The cursor is on line `lnum` of the list: the details show that plugin.
 function M.select(lnum)
     local entry = entries[lnum]
-    if entry then selected = entry.name end
+    if entry and entry.name then selected = entry.name end
 end
 
 --- The window closed: the next one starts with a fresh selection.
@@ -513,6 +652,45 @@ local function step_note(step)
     return step.note, 'SarcinaNote'
 end
 
+-- Under a Tasks title, a line per task of the plugin's plan with its own time and note.
+local function task_lines(name)
+    local lines = { build_line({ { 'Tasks', 'SarcinaHeader' } }) }
+    for _, step in ipairs(stats.steps(name)) do
+        local note, group = step_note(step)
+        local time = format_time(step.duration)
+        table.insert(
+            lines,
+            build_line({
+                { ' ' },
+                { STEP_GLYPH[step.status], STEP_HL[step.status] },
+                { ' ' },
+                { step.id, STEP_GROUP[step.id] or 'SarcinaStepOther' },
+                { time ~= '' and ' ' or '' },
+                { time, 'SarcinaStepTime' },
+                { note and '  ' .. (note:gsub('%s+', ' ')) or '', group },
+            })
+        )
+    end
+    return lines
+end
+
+-- Under a Changelog title, a line per commit of an update, newest first; a breaking one is red and marked.
+local function changelog_lines(commits)
+    local lines = { build_line({ { 'Changelog', 'SarcinaHeader' } }) }
+    for _, commit in ipairs(commits) do
+        table.insert(
+            lines,
+            build_line({
+                { ' ' },
+                { commit.breaking and '△ ' or '  ', 'SarcinaBreaking' },
+                { short(commit.sha), 'SarcinaRev' },
+                { ' ' .. commit.subject, commit.breaking and 'SarcinaBreaking' or 'SarcinaCommit' },
+            })
+        )
+    end
+    return lines
+end
+
 --- Draws the details of the selected plugin in `buf`: its facts, then one line per task of its plan with
 --- the task's own time. Returns the plugin's name, or nil when nothing is selected.
 function M.draw_details(buf)
@@ -538,6 +716,11 @@ function M.draw_details(buf)
         add('pin', pin and require('sarcina.pin').describe(pin) or nil)
         add('path', vim.fn.fnamemodify(dir, ':~'))
         add('rev', rev_of(selected, dir))
+        local info = checker().update_of(selected)
+        if info then
+            local parts = { { pad('update', KEY_W + 1), 'SarcinaTag' }, { short(info.to), 'SarcinaRev' } }
+            table.insert(lines, build_line(vim.list_extend(parts, behind(info))))
+        end
         add('deps', type(spec.deps) == 'table' and table.concat(spec.deps, ', ') or nil)
         add('triggers', triggered and require('sarcina.scheduler').describe(spec.triggers) or nil)
         add('armed', triggered and require('sarcina.scheduler').state(selected) or nil)
@@ -548,22 +731,10 @@ function M.draw_details(buf)
             row.state == 'failed' and 'SarcinaFailed' or 'SarcinaNote'
         )
         table.insert(lines, build_line({}))
-        table.insert(lines, build_line({ { 'Tasks', 'SarcinaHeader' } }))
-        for _, step in ipairs(stats.steps(selected)) do
-            local note, group = step_note(step)
-            local time = format_time(step.duration)
-            table.insert(
-                lines,
-                build_line({
-                    { ' ' },
-                    { STEP_GLYPH[step.status], STEP_HL[step.status] },
-                    { ' ' },
-                    { step.id, STEP_GROUP[step.id] or 'SarcinaStepOther' },
-                    { time ~= '' and ' ' or '' },
-                    { time, 'SarcinaStepTime' },
-                    { note and '  ' .. (note:gsub('%s+', ' ')) or '', group },
-                })
-            )
+        if M.changelog and info and info.commits then
+            vim.list_extend(lines, changelog_lines(info.commits))
+        else
+            vim.list_extend(lines, task_lines(selected))
         end
     end
     vim.api.nvim_buf_clear_namespace(buf, DETAIL_NS, 0, -1)

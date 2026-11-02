@@ -84,6 +84,15 @@ function M.remove(names)
     end
     installs.forget(removed)
     lock.forget(removed)
+    -- The plugin leaves this session too: no row, no stubs, no jobs. A spec that is still there brings it back
+    -- when `install` registers the manifest again.
+    require('sarcina.stats').forget(removed)
+    track.forget(removed)
+    tasks.forget(removed)
+    for _, name in ipairs(removed) do
+        require('sarcina.scheduler').forget(name)
+    end
+    ui.emit('updates')
     return removed, failed
 end
 

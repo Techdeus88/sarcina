@@ -299,6 +299,57 @@ function M.git_update(job, done, report)
     end)
 end
 
+-- A conventional commit that says it breaks something: `feat!:` or `feat(scope)!:` in the subject, or a
+-- `BREAKING CHANGE` footer.
+local function breaking(subject, body)
+    return subject:match('^[%w_-]+!:') ~= nil
+        or subject:match('^[%w_-]+%b()!:') ~= nil
+        or body:match('BREAKING[ -]CHANGE') ~= nil
+end
+
+-- The commits after `HEAD` up to what was fetched last, newest first, as { sha, subject, breaking }.
+local function commits_ahead(dir, cb)
+    git(dir, { 'log', '--format=%H%x1f%s%x1f%b%x1e', 'HEAD..FETCH_HEAD' }, function(ok, out)
+        if not ok then return cb(nil) end
+        local list = {}
+        for record in out:gmatch('[^\30]+') do
+            local sha, subject, body = record:match('^%s*(%x+)\31([^\31]*)\31(.*)$')
+            if sha then
+                table.insert(list, { sha = sha, subject = subject, breaking = breaking(subject, body) })
+            end
+        end
+        cb(list)
+    end)
+end
+
+--- Whether the plugin in `dir` is where `pin` asks for (see find_target), without moving it: cb(nil) when it is,
+--- cb(info) when it is not, and cb(false, why) when the remote could not say. `info` has `from` and `to`, the
+--- commits it is at and should be at, and `commits`, the commits in between, newest first, as
+--- { sha, subject, breaking }. Only the commits after the one the plugin is at are fetched, and only for a
+--- plugin that is behind; `commits` is nil when they could not be, and for a commit pin.
+function M.look_ahead(dir, pin, cb)
+    find_target(dir, 'origin', pin, function(found, target)
+        if not found then return cb(false, target) end
+        git(dir, { 'log', '-1', '--format=%H %ct' }, function(read, out)
+            local head, time = out:match('^(%x+) (%d+)')
+            if not read or not head then return cb(false, read and 'no commit' or out) end
+            local goal = target.sha or target.commit
+            if is_commit(head, goal) then return cb(nil) end
+            local info = { from = head, to = goal }
+            if target.commit then return cb(info) end
+            -- A day before the plugin's commit, so that commit and everything after it come down.
+            local since = os.date('!%Y-%m-%dT%H:%M:%SZ', tonumber(time) - 86400)
+            git(dir, { 'fetch', '--shallow-since=' .. since, 'origin', target.ref }, function(fetched)
+                if not fetched then return cb(info) end
+                commits_ahead(dir, function(list)
+                    info.commits = list
+                    cb(info)
+                end)
+            end, true)
+        end)
+    end)
+end
+
 function M.make(job, done, report)
     local cwd = job.spec.cwd or paths.install(job.plugin)
     run_cmd({ 'make' }, { cwd = cwd }, report, done)

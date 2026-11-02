@@ -181,6 +181,13 @@ function M.register(name, entry)
     vim.schedule(function() catch_up(plugin) end)
 end
 
+--- Take the stubs of `name` away, so a trigger no longer loads a plugin that is gone.
+function M.forget(name)
+    local plugin = M._plugins[name]
+    if plugin and plugin.state == 'waiting' then disarm(plugin) end
+    M._plugins[name] = nil
+end
+
 function M.state(name)
     local plugin = M._plugins[name]
     return plugin and plugin.state

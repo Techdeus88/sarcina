@@ -26,7 +26,18 @@ end
 
 local function win_open() return ui._winid ~= nil and vim.api.nvim_win_is_valid(ui._winid) end
 
-local function lines() return vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false) end
+-- Every line of the list: the section headers, the blank lines between sections, and the rows.
+local function buffer_lines() return vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false) end
+
+-- The rows of the plugins, in the order the list shows them, without the section headers.
+local function lines()
+    local rows = {}
+    for lnum, line in ipairs(buffer_lines()) do
+        local entry = window.entry_at(lnum)
+        if entry and entry.kind == 'plugin' then table.insert(rows, line) end
+    end
+    return rows
+end
 
 local function header_all() return vim.api.nvim_buf_get_lines(ui._header_bufnr, 0, -1, false) end
 
@@ -59,7 +70,7 @@ local function loaded(name) return { name = name, tasks = { h.lua('rtp', h.noop)
 -- The row of the plugin `name` in the list.
 local function row_of(name)
     for _, line in ipairs(lines()) do
-        if line:find('^ ' .. vim.pesc(name) .. '%s') then return line end
+        if line:find('^%s+' .. vim.pesc(name) .. '%s') then return line end
     end
 end
 
@@ -100,8 +111,8 @@ test('there is one row per plugin in load order, with its state and its task cou
         for i = 1, 6 do
             h.ok(got[i]:find('plugin' .. i, 1, true), 'row ' .. i .. ' is ' .. got[i])
         end
-        h.ok(got[1]:find('^ plugin1%s+%([<%d%.]+ms%)%s+later%s+.*2/2%s+tasks ✔.*loaded'), got[1])
-        h.ok(got[3]:find('^ plugin3%s+%([<%d%.]+ms%)%s+later%s+.*2/2%s+tasks ✘.*failed'), got[3])
+        h.ok(got[1]:find('^   plugin1%s+%([<%d%.]+ms%)%s+later%s+.*2/2%s+tasks ✔.*loaded'), got[1])
+        h.ok(got[3]:find('^   plugin3%s+%([<%d%.]+ms%)%s+later%s+.*2/2%s+tasks ✘.*failed'), got[3])
         h.ok(details_text():find('detail%s+boom'), 'the failed plugin is selected: ' .. details_text())
     end)
 end)
@@ -114,7 +125,7 @@ test('a running row shows its work, and the details show its output, until it is
     with_size(200, 50, function()
         h.ok(vim.wait(500, win_open), 'the window never opened')
         h.ok(vim.wait(500, function() return lines()[1]:find('installing', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('^ slow%s+.*later%s+.*1/2%s+tasks ▶.*installing'), lines()[1])
+        h.ok(lines()[1]:find('^   slow%s+.*later%s+.*1/2%s+tasks ▶.*installing'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
         h.ok(
             vim.wait(500, function() return details_text():find('Receiving objects: 45%', 1, true) end),
@@ -124,7 +135,7 @@ test('a running row shows its work, and the details show its output, until it is
         release()
         h.ok(tasks.wait(2000))
         h.ok(vim.wait(500, function() return lines()[1]:find('loaded', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('^ slow%s+.*later%s+.*2/2%s+tasks ✔.*loaded'), lines()[1])
+        h.ok(lines()[1]:find('^   slow%s+.*later%s+.*2/2%s+tasks ✔.*loaded'), lines()[1])
         h.eq(header_text(), ' Total: 1 plugin')
     end)
 end)
@@ -167,17 +178,23 @@ test('a row moves up when its plugin loads, so the rows keep the order of the lo
     h.register({ held, fast })
     with_size(200, 50, function()
         ui.open()
-        h.ok(lines()[1]:find('^ a%s+later%s+.*tasks …'), lines()[1])
-        h.ok(lines()[2]:find('^ b%s+later%s+.*tasks …'), lines()[2])
+        h.ok(lines()[1]:find('^   a%s+later%s+.*tasks …'), lines()[1])
+        h.ok(lines()[2]:find('^   b%s+later%s+.*tasks …'), lines()[2])
         tasks.enqueue('a', held)
         tasks.enqueue('b', fast)
         tasks.run_all()
-        h.ok(vim.wait(500, function() return lines()[1]:find('^ b%s+.*later%s+.*tasks ✔') end), lines()[1])
-        h.ok(lines()[2]:find('^ a%s+.*later%s+.*tasks ▶'), lines()[2])
+        h.ok(
+            vim.wait(500, function() return lines()[1]:find('^   b%s+.*later%s+.*tasks ✔') end),
+            lines()[1]
+        )
+        h.ok(lines()[2]:find('^   a%s+.*later%s+.*tasks ▶'), lines()[2])
         release()
         h.ok(tasks.wait(2000))
-        h.ok(vim.wait(500, function() return lines()[2]:find('^ a%s+.*later%s+.*tasks ✔') end), lines()[2])
-        h.ok(lines()[1]:find('^ b%s+.*later%s+.*tasks ✔'), lines()[1])
+        h.ok(
+            vim.wait(500, function() return lines()[2]:find('^   a%s+.*later%s+.*tasks ✔') end),
+            lines()[2]
+        )
+        h.ok(lines()[1]:find('^   b%s+.*later%s+.*tasks ✔'), lines()[1])
     end)
 end)
 
@@ -226,7 +243,8 @@ test(
             h.ok(got[3]:find(' 1/2 %s*tasks ▶ '), got[3])
             h.ok(got[4]:find(' 0/1 %s*tasks … '), got[4])
             -- Each widget has four parts, in the colour of its state: the two ends, the count and the label.
-            for line, kind in pairs({ [1] = 'Done', [2] = 'Failed', [3] = 'Running', [4] = 'Idle' }) do
+            for name, kind in pairs({ done = 'Done', failed = 'Failed', running = 'Running', idle = 'Idle' }) do
+                local line = window.line(name)
                 local groups = groups_on(line)
                 for _, suffix in ipairs({ 'Left', 'Count', '', 'Right' }) do
                     h.ok(
@@ -279,7 +297,7 @@ test('the parts of a row are one space apart, with no padding after a short name
         ui.open()
         for _, name in ipairs({ 'a', 'a-much-longer-name.nvim' }) do
             local row = row_of(name)
-            h.ok(row:find('^ ' .. vim.pesc(name) .. ' %([<%d%.]+ms%) later  1/1  tasks ✔  loaded$'), row)
+            h.ok(row:find('^   ' .. vim.pesc(name) .. ' %([<%d%.]+ms%) later  1/1  tasks ✔  loaded$'), row)
         end
         ui.configure(nil)
     end)
@@ -305,20 +323,22 @@ test(
             )
             -- name, (load time), when it loads, count/total tasks and the icon of the state, status message
             h.ok(
-                row_of('plugin'):find('^ plugin%s+%([<%d%.]+ms%)%s+later%s+.-1/1%s+tasks ✔.-%s+loaded%s*$'),
+                row_of('plugin'):find(
+                    '^   plugin%s+%([<%d%.]+ms%)%s+later%s+.-1/1%s+tasks ✔.-%s+loaded%s*$'
+                ),
                 row_of('plugin')
             )
             h.ok(
                 row_of('broken'):find(
-                    '^ broken%s+%([<%d%.]+ms%)%s+later%s+.-1/1%s+tasks ✘.-%s+failed · it broke%s*$'
+                    '^   broken%s+%([<%d%.]+ms%)%s+later%s+.-1/1%s+tasks ✘.-%s+failed · it broke%s*$'
                 ),
                 row_of('broken')
             )
             h.ok(
-                row_of('running'):find('^ running%s+later%s+.-1/2%s+tasks ▶.-%s+installing · Receiv'),
+                row_of('running'):find('^   running%s+later%s+.-1/2%s+tasks ▶.-%s+installing · Receiv'),
                 row_of('running')
             )
-            h.ok(not row_of('plugin'):find('^ ✔'), 'a row starts with its name, not an icon')
+            h.ok(not row_of('plugin'):find('^   ✔'), 'a row starts with its name, not an icon')
             release()
             h.ok(tasks.wait(2000))
         end)
@@ -346,7 +366,7 @@ test(
                     not row:find('installing', 1, true),
                     'half the window has no room for the message: ' .. row
                 )
-                h.ok(row:find('^ a%-plugin%-with.-… later'), 'the name was not cut to fit: ' .. row)
+                h.ok(row:find('^   a%-plugin%-with.-… later'), 'the name was not cut to fit: ' .. row)
                 h.ok(vim.fn.strdisplaywidth(row) <= vim.api.nvim_win_get_config(ui._winid).width, row)
             end)
             release()
@@ -373,7 +393,7 @@ test(
         with_size(120, 40, function()
             ui.open()
             vim.api.nvim_set_current_win(ui._winid)
-            vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line('b'), 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
             local function widths()
                 return {
@@ -391,7 +411,7 @@ test(
             h.eq(window.view, 'split')
             h.eq(widths(), { 46, 46 })
             h.ok(footer_hint():find('= 70/30', 1, true), footer_hint())
-            h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 2)
+            h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], window.line('b'))
             h.eq(window.selected(), 'b')
             -- The header and the footer keep the whole width.
             h.eq(vim.api.nvim_win_get_config(ui._header_winid).width + 2, 96)
@@ -425,12 +445,12 @@ test('the src of a plugin is the URL it is cloned from', function()
     })
     with_size(200, 50, function()
         ui.open()
-        for line, expected in pairs({
-            [1] = 'https://github.com/owner/short',
-            [2] = 'https://example.com/team/full.git',
-            [3] = 'file:///tmp/file-remote',
+        for name, expected in pairs({
+            short = 'https://github.com/owner/short',
+            full = 'https://example.com/team/full.git',
+            file = 'file:///tmp/file-remote',
         }) do
-            vim.api.nvim_win_set_cursor(ui._winid, { line, 0 })
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line(name), 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
             h.ok(details_text():find('src%s+' .. vim.pesc(expected) .. '\n'), details_text())
         end
@@ -451,8 +471,8 @@ test('a plugin that waits for its trigger is yellow, with a yellow pill', functi
     h.run({ { name = 'waits', tasks = { plugin.tasks[1] } } })
     with_size(200, 50, function()
         ui.open()
-        h.ok(lines()[1]:find('^ waits%s+.*trigger%s+.*1/2%s+tasks ○.*waiting for :Waits'), lines()[1])
-        local groups = groups_on(1)
+        h.ok(lines()[1]:find('^   waits%s+.*trigger%s+.*1/2%s+tasks ○.*waiting for :Waits'), lines()[1])
+        local groups = groups_on(window.line('waits'))
         h.ok(groups.SarcinaWaiting, 'the glyph and the state are not yellow')
         h.ok(groups.SarcinaPillWaitingCount and groups.SarcinaPillWaiting, 'the pill is not yellow')
         h.ok(not lines()[1]:find('✔', 1, true), 'a plugin that waits is not complete: ' .. lines()[1])
@@ -582,7 +602,7 @@ test('the header and the footer stay in view while the list scrolls', function()
         local before = { header_text(), footer(), vim.api.nvim_win_get_config(ui._header_winid).row }
         local footer_row = vim.api.nvim_win_get_config(ui._footer_winid).row
         h.eq(top_of(ui._winid), 1)
-        vim.api.nvim_win_set_cursor(ui._winid, { 60, 0 })
+        vim.api.nvim_win_set_cursor(ui._winid, { #buffer_lines(), 0 })
         h.ok(top_of(ui._winid) > 1, 'the list did not scroll')
         h.eq(header_text(), before[1])
         h.eq(footer(), before[2])
@@ -650,7 +670,8 @@ test('an event redraws only the row of its plugin in the list, and the header an
     tasks.enqueue('b', held)
     tasks.run_all()
     h.ok(vim.wait(500, function() return lines()[2]:find('installing', 1, true) end), lines()[2])
-    h.eq({ touched[0], touched[1], touched[2] }, { nil, true, nil })
+    local b = window.line('b') - 1 -- 0-based, as on_lines counts
+    h.eq({ touched[b - 1], touched[b], touched[b + 1] }, { nil, true, nil })
     h.ok(chrome >= 2, 'the header and the footer were not redrawn')
     release()
     h.ok(tasks.wait(2000))
@@ -851,7 +872,7 @@ test(
             h.ok(top_of(ui._detail_winid) < scrolled, 'ctrl-u did not scroll back')
             press('<C-d>')
             h.ok(top_of(ui._detail_winid) > 1)
-            vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line('b'), 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
             h.eq(title_of(ui._detail_winid), ' b ')
             h.eq(top_of(ui._detail_winid), 1)
@@ -880,11 +901,15 @@ test('the details follow the cursor of the list', function()
     with_size(200, 50, function()
         ui.open()
         h.eq(title_of(ui._detail_winid), ' a ')
-        for line, name in pairs({ [2] = ' b ', [3] = ' c ', [1] = ' a ' }) do
-            vim.api.nvim_win_set_cursor(ui._winid, { line, 0 })
+        for _, name in ipairs({ 'b', 'c', 'a' }) do
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line(name), 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-            h.eq(title_of(ui._detail_winid), name)
+            h.eq(title_of(ui._detail_winid), ' ' .. name .. ' ')
         end
+        -- A section header names no plugin, so the details stay on the last one.
+        vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
+        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+        h.eq(title_of(ui._detail_winid), ' a ')
     end)
 end)
 
@@ -936,8 +961,11 @@ test(
             release()
             h.ok(tasks.wait(2000))
             -- b loaded and moved above a; the cursor went with a.
-            h.ok(vim.wait(500, function() return window.line('a') == 2 end), 'the rows did not move')
-            h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 2)
+            h.ok(
+                vim.wait(500, function() return window.line('a') > window.line('b') end),
+                'the rows did not move'
+            )
+            h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], window.line('a'))
             h.eq(title_of(ui._detail_winid), ' a ')
         end)
     end
@@ -972,9 +1000,10 @@ end)
 test('entry_at maps the lines of the list to their plugins', function()
     h.register({ loaded('a'), loaded('b') })
     ui.open()
-    h.eq(window.entry_at(1), { kind = 'plugin', name = 'a' })
-    h.eq(window.entry_at(2), { kind = 'plugin', name = 'b' })
-    h.eq(window.entry_at(3), nil)
+    h.eq(window.entry_at(1), { kind = 'section' })
+    h.eq(window.entry_at(2), { kind = 'plugin', name = 'a' })
+    h.eq(window.entry_at(3), { kind = 'plugin', name = 'b' })
+    h.eq(window.entry_at(4), nil)
 end)
 
 test('an install of what is already on disk never opens the window', function()
@@ -996,7 +1025,7 @@ if vim.fn.executable('git') == 1 then
         h.ok(tasks.wait(5000))
         -- At 80 columns the state word gives way, and the glyph and the check say it.
         h.ok(vim.wait(500, function() return lines()[1]:find('tasks ✔', 1, true) end), lines()[1])
-        h.ok(lines()[1]:find('^ clonewin.nvim%s+.*later%s+.*2/2%s+tasks ✔'), lines()[1])
+        h.ok(lines()[1]:find('^   clonewin.nvim%s+.*later%s+.*2/2%s+tasks ✔'), lines()[1])
     end)
 
     test(
@@ -1056,7 +1085,9 @@ if vim.fn.executable('git') == 1 then
         )
         local seen = run_child(spec)
         h.eq(seen.open, true)
-        h.ok(seen.lines[1]:find('^ winchild.nvim%s+.*later%s+.*3/3%s+tasks ✔'), vim.inspect(seen.lines))
+        local row =
+            vim.tbl_filter(function(line) return line:find('winchild.nvim', 1, true) end, seen.lines)[1]
+        h.ok(row and row:find('^   winchild.nvim%s+.*later%s+.*3/3%s+tasks ✔'), vim.inspect(seen.lines))
     end)
 
     test('in a real startup with everything installed no window opens', function()
@@ -1066,28 +1097,31 @@ if vim.fn.executable('git') == 1 then
     end)
 end
 
-test('the list keys send check, update, install, load and delete to the plugins under the cursor or selection', function()
-    local plugins = {}
-    for _, name in ipairs({ 'ka', 'kb', 'kc' }) do
-        table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
+test(
+    'the list keys send check, update, install, load and delete to the plugins under the cursor or selection',
+    function()
+        local plugins = {}
+        for _, name in ipairs({ 'ka', 'kb', 'kc' }) do
+            table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
+        end
+        h.register(plugins)
+        h.run(plugins)
+        local cli = require('sarcina.cli')
+        local dispatch, sent = cli.dispatch, {}
+        cli.dispatch = function(args) table.insert(sent, args.fargs) end
+        with_size(200, 50, function()
+            ui.open()
+            vim.api.nvim_set_current_win(ui._winid)
+            local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line('kb'), 0 })
+            press('u')
+            press('U')
+            press('l')
+            press('Vjd')
+        end)
+        cli.dispatch = dispatch
+        h.eq(sent, { { 'update', 'kb' }, { 'update' }, { 'load', 'kb' }, { 'delete', 'kb', 'kc' } })
     end
-    h.register(plugins)
-    h.run(plugins)
-    local cli = require('sarcina.cli')
-    local dispatch, sent = cli.dispatch, {}
-    cli.dispatch = function(args) table.insert(sent, args.fargs) end
-    with_size(200, 50, function()
-        ui.open()
-        vim.api.nvim_set_current_win(ui._winid)
-        local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
-        vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
-        press('u')
-        press('U')
-        press('l')
-        press('Vjd')
-    end)
-    cli.dispatch = dispatch
-    h.eq(sent, { { 'update', 'kb' }, { 'update' }, { 'load', 'kb' }, { 'delete', 'kb', 'kc' } })
-end)
+)
 
 return tests

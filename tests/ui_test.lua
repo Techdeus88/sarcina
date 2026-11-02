@@ -109,7 +109,7 @@ test('an appended run keeps earlier failures in the window', function()
     vim.wait(100)
     local function row_of(name)
         for _, line in ipairs(lines()) do
-            if line:find('^ ' .. name .. '%s') then return line end
+            if line:find('^%s+' .. name .. '%s') then return line end
         end
     end
     h.ok(row_of('a'):find('later.*1/1%s+tasks ✘'), row_of('a'))
@@ -119,7 +119,7 @@ end)
 test('the cursor sits on the plugin at work, else on the last failed one', function()
     run({ failing('a'), loaded('b'), failing('c') })
     ui.open()
-    h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 3)
+    h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], require('sarcina.window').line('c'))
 end)
 
 test('a clean appended run does not auto-close a window that still shows a failure', function()

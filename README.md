@@ -249,7 +249,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | `:Sarcina load [plugins]` | load the plugins that are on disk but have not loaded in this session. Nothing is cloned |
 | `:Sarcina sync` | `install`, and list the directories that are not in your specs |
 | `:Sarcina sync!` | the same, and delete those directories |
-| `:Sarcina check [plugins]` | ask each plugin's remote where the plugin should be, and say which are elsewhere. Nothing is changed |
+| `:Sarcina check [plugins]` | look for updates in the background and list them in the window's Updates section, with a message when done. Nothing is changed |
 | `:Sarcina update [plugins]` | check, ask, then move each plugin that has a newer commit to it, rebuild what moved, and write the lock file |
 | `:Sarcina delete <plugins>` | ask, then delete the named plugins from the plugins directory. One name or several |
 | `:Sarcina clean` | list the plugin directories that are not in your specs |
@@ -260,7 +260,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 `check` and `update` take plugin names, completed with Tab, and do every plugin of the manifest without any. They read your specs from disk, like `install`, and show up in the window as `checking` and `updating`.
 
-**`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. It downloads nothing, and names the plugins that are somewhere else. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
+**`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. For a plugin that is somewhere else it fetches the commits after the one the plugin is at (`git fetch --shallow-since`), to list them, and leaves the checkout as it is. It runs outside the task list, so the rows keep their state, and its results go to the [Updates section](#updates) of the window; a message names the plugins that have an update. A check of named plugins keeps what an earlier check found for the others. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
 
 **`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`delete`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are skipped with `setup({ confirm = false })`.
 
@@ -314,32 +314,46 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
 
 ```
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Total: 55 plugins                                                                                          │
-│                                               127/210 tasks                                                │
+│ Total: 6 plugins                                                                                           │
+│                                                13/25 tasks                                                 │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────────────────────────────────────╮╭ avante.nvim ───────────────────╮
-│ plenary.nvim (110ms) now  3/3  tasks ✔  loaded                           ││state     ✘ failed              │
-│ telescope.nvim (2.1s) later  1/6  tasks ▶  installing · Receiving object…││tasks     2/3 tasks ✘ 120ms     │
-│ blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter           ││timing    later                 │
-│ avante.nvim (120ms) later  2/3  tasks ✘  failed · make: command not found││src       https://github.com/   │
-│ smart-splits.nvim (62ms) later  1/3  tasks ⊘  blocked · dependency avant…││          yetone/avante.nvim    │
-│                                                                          ││path      ~/.local/share/nvim/  │
-│                                                                          ││          sarcina/plugins/      │
-│                                                                          ││          avante.nvim           │
-│                                                                          ││rev       5e4e310               │
-│                                                                          ││                                │
-│                                                                          ││Tasks                           │
-│                                                                          ││ ✔ install 104ms installed      │
-│                                                                          ││ ✘ build 12ms  make: command…   │
+╭──────────────────────────────────────────────────────────────────────────╮╭ nvim-treesitter ───────────────╮
+│ Updates (1)  <CR> changelog                                              ││state     ✔ loaded              │
+│   ↑ nvim-treesitter 0195cd6 feat(jinja)!… · 1 commit behind  △ 1 breaking││tasks     4/4 tasks ✔ 40ms      │
+│                                                                          ││timing    later                 │
+│ Now (1)                                                                  ││src       https://github.com/   │
+│   plenary.nvim (110ms) now  3/3  tasks ✔  loaded                         ││          nvim-treesitter/      │
+│                                                                          ││          nvim-treesitter       │
+│ Later (4)                                                                ││rev       a1b2c3d               │
+│   nvim-treesitter (40ms) later  4/4  tasks ✔  loaded                     ││update    0195cd6 · 1 commit    │
+│   telescope.nvim (2.1s) later  1/6  tasks ▶  installing · Receiving obje…││          behind  △ 1 breaking  │
+│   avante.nvim (120ms) later  2/3  tasks ✘  failed · make: command not fo…││                                │
+│   smart-splits.nvim (62ms) later  1/3  tasks ⊘  blocked · dependency ava…││Changelog                       │
+│                                                                          ││ △ 0195cd6 feat(jinja)!:        │
+│ Triggered (1)                                                            ││   update parser and queries    │
+│   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││                                │
 ╰──────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────╯
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Now 7, Later 18, Triggered 30                                                                Startup: 83ms │
-╰──────────────────────────────────────────────────────────────── q close · = 50/50 · ^d ^u scroll details ──╯
+│ Now 1, Later 4, Triggered 1                                                                  Startup: 83ms │
+╰────────────────────────────────────────────────────── q close · = 50/50 · C check · ^d ^u scroll details ──╯
 ```
 
 **The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3/8`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** says how many load now, later and on a trigger, on the left, and the startup time on the right: `Now 7, Later 18, Triggered 30` and `Startup: 83ms`. Both come from `stats.get()`.
 
-**The list** has one row per plugin, in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. So installed `now` plugins come first, since they load before the UI, then the `later` ones as they finish, then triggered ones as they fire.
+**The list** has a section per timing, `Now`, `Later` and `Triggered`, each under a header with its count (`Later (18)`) and a blank line before the next; a section with no plugins is left out. Within a section the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. The cursor moves over the headers too; on one the details keep the last plugin.
+
+### Updates
+
+When the window opens it looks for updates in the background (see `check` under [Commands](#commands)), and an `Updates` section at the top of the list shows what it finds:
+
+```
+ Updates (1)  ↻ checking…  <CR> changelog
+   ↑ nvim-treesitter 0195cd6 feat(jinja)!: update parser and queries · 1 commit behind  △ 1 breaking
+```
+
+While the check runs the header says `↻ checking…`. Each plugin that is behind gets a row as its answer comes in: the commit it would move to, the subject of the newest commit, how many commits it is behind, and how many of them break something. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. The rows move with the cursor like the others, and the details show the plugin with an `update` line. `<CR>` switches the details to the plugin's changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. A check that found nothing says `✔ up to date`, and remotes that could not be reached are counted in the header.
+
+The check skips a window that opens less than 5 minutes after a check of every plugin finished, and a window that opens while plugins are being installed or updated checks once that run ends. `setup({ ui = { check_on_open = false } })` turns it off; then `C` in the list, or `:Sarcina check`, looks when you ask. Nothing moves until you run `update`.
 
 A row is `name (load time) when it loads, tasks widget, status message`, one space apart with no padding, for example `plenary.nvim (110ms) later  3/3  tasks ✔  loaded`. The rows do not line up in columns: a short name is followed straight by its time. The load time is the run time of all that plugin's tasks added up, not the load alone; a task counts when it ends, and time spent waiting behind the install barrier or a dependency does not. The status message is the state and what it adds, such as git's line or the error: `installing · Receiving objects`, `failed · make: command not found`, `waiting for :Telescope`. It takes the rest of the row, so in the `main` view a long message, such as git's progress or a build error, shows in full on a wide screen. A shorter list, in the `split` view or on a narrow screen, cuts it with `…`. A list with no room for a few characters of it drops it, and the widget alone still says the state; only then is a long name cut with `…`.
 

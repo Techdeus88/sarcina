@@ -5,13 +5,15 @@
 -- header and the footer have windows of their own so they stay in view. This module decides when it opens
 -- and which plugins to redraw, owns the four windows, and keeps no task state of its own.
 -- Events: "info" | "warn" | "warning" | "error" (strings, shown as toasts), "debug" (string, listeners only),
--- "task" (job), "start", "done" (summary).
+-- "task" (job), "start", "done" (summary), "updates" (the state of checker.lua).
 
 local M = {}
 
 M.close_delay = 3000
 -- When the window opens by itself: 'auto' on real work and on a failure, 'always' at every startup, 'never'.
 M.show = 'auto'
+-- Whether opening the window looks for updates (see checker.lua). Off, `C` in the window or :Sarcina check does it.
+M.check_on_open = true
 
 M._listeners = {}
 M._bufnr = nil -- the list
@@ -30,6 +32,7 @@ M._dirty = {} -- plugin names with an event since the last flush
 M._want = false -- an event since the last flush asked for the window
 M._full = false -- the next flush redraws every line
 M._flush_pending = false
+M._check_after_run = false -- the window opened during a run, so it checks for updates when the run ends
 
 local SHOW = { auto = true, always = true, never = true }
 local LEVELS = {
@@ -86,12 +89,13 @@ function M.configure(opts)
         view = 'main'
     end
     window().view = view
+    M.check_on_open = not opts or opts.check_on_open ~= false
 end
 
 -- The keys the footer names. `=` says which view it switches to.
 local function hint()
     local other = window().view == 'main' and '50/50' or '70/30'
-    return ' q close · = ' .. other .. ' · ^d ^u scroll details '
+    return ' q close · = ' .. other .. ' · C check · ^d ^u scroll details '
 end
 
 -- Draws the details of the selected plugin and names the details window after it. A different plugin
@@ -234,6 +238,14 @@ local function ensure_buffer()
         function() M.toggle_view() end,
         { buffer = M._bufnr, nowait = true, desc = 'Switch the Sarcina view between 70/30 and 50/50' }
     )
+    vim.keymap.set('n', '<CR>', function()
+        window().toggle_changelog()
+        show_details()
+    end, {
+        buffer = M._bufnr,
+        nowait = true,
+        desc = 'Show the changelog of a Sarcina update, or its tasks',
+    })
     map_actions(M._bufnr)
     for _, key in ipairs({ '<C-d>', '<C-u>' }) do
         vim.keymap.set(
@@ -284,6 +296,7 @@ local function open_window(enter)
     })
     M._seen_failed = snapshot().counts.failed
     follow(true)
+    if M.check_on_open then M.check(true) end
 end
 
 -- Redraws what changed since the last flush, and opens the window when an event asked for it. A failure
@@ -340,6 +353,10 @@ end
 
 function M._on_done(summary)
     schedule_flush()
+    if M._check_after_run then
+        M._check_after_run = false
+        if win_valid() then M.check(true) end
+    end
     if summary.total == 0 then return end
     local text = string.format('%d done', summary.done)
     if summary.failed > 0 then text = text .. string.format(', %d failed', summary.failed) end
@@ -364,6 +381,9 @@ function M.emit(event, payload)
         M._on_start(payload)
     elseif event == 'done' then
         M._on_done(payload)
+    elseif event == 'updates' then
+        M._full = true
+        schedule_flush()
     end
     for _, fn in ipairs(M._listeners) do
         pcall(fn, event, payload)
@@ -406,6 +426,20 @@ function M.dismiss()
     M._dismissed = true
     M._seen_failed = snapshot().counts.failed
     M.close()
+end
+
+--- Looks for updates in the background (see checker.lua); the window shows them in its Updates section.
+--- `on_open` is for the check the window starts when it opens: it skips a check that finished a moment ago, and
+--- while plugins are being installed or updated it waits for that run to end.
+function M.check(on_open)
+    local checker = require('sarcina.checker')
+    if checker.state().running then return end
+    if on_open and checker.fresh() then return end
+    if require('sarcina.tasks').has_active() then
+        M._check_after_run = true
+        return
+    end
+    checker.run()
 end
 
 --- Switches the window between its views, main (the list 70%, the details 30%) and split (50/50), and redraws

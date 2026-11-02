@@ -239,6 +239,15 @@ end
 --- after the ones that have, so a row moves up when its plugin loads.
 function M.plugins() return vim.tbl_map(row_of, load_order()) end
 
+--- Drop the plugins `names` from the session: they stop being rows and stop counting.
+function M.forget(names)
+    local gone = {}
+    for _, name in ipairs(names) do
+        gone[name], registered[name] = true, nil
+    end
+    order = vim.tbl_filter(function(name) return not gone[name] end, order)
+end
+
 --- Forget the origin and the registered plugins. For tests.
 function M._reset()
     origin = vim.uv.hrtime()

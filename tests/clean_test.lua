@@ -205,4 +205,27 @@ test('delete runs without a question when confirm is off', function()
     h.eq(exists('rmquiet.nvim'), false)
 end)
 
+test('delete takes the plugin out of the session at once: no row, no count, no jobs', function()
+    empty_plugins_dir()
+    manifest({ 'rmrow.nvim', 'rmstay.nvim' })
+    plugin_dir('rmrow.nvim')
+    plugin_dir('rmstay.nvim')
+    local plugins = {
+        { name = 'rmrow.nvim', tasks = { h.lua('rtp', h.noop) } },
+        { name = 'rmstay.nvim', tasks = { h.lua('rtp', h.noop) } },
+    }
+    h.register(plugins)
+    h.run(plugins)
+    local stats = require('sarcina.stats')
+    h.eq(stats.get().count, 2)
+    vim.cmd('runtime plugin/sarcina.lua')
+    vim.cmd('Sarcina delete rmrow.nvim')
+    h.eq(stats.plugin('rmrow.nvim'), nil)
+    h.eq(h.names(stats.plugins()), { 'rmstay.nvim' })
+    h.eq(stats.get().count, 1)
+    h.eq(#require('sarcina.track').jobs_of('rmrow.nvim'), 0)
+    h.eq(require('sarcina.tasks').plugin_failed('rmrow.nvim'), false)
+    manifest({})
+end)
+
 return tests
