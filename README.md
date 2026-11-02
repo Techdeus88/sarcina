@@ -248,7 +248,8 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | `:Sarcina sync` | `install`, and list the directories that are not in your specs |
 | `:Sarcina sync!` | the same, and delete those directories |
 | `:Sarcina check [plugins]` | ask each plugin's remote where the plugin should be, and say which are elsewhere. Nothing is changed |
-| `:Sarcina update [plugins]` | move each plugin to where its remote says it should be, rebuild what moved, and write the lock file |
+| `:Sarcina update [plugins]` | check, ask, then move each plugin that has a newer commit to it, rebuild what moved, and write the lock file |
+| `:Sarcina remove <plugins>` | ask, then delete the named plugins from the plugins directory. One name or several |
 | `:Sarcina clean` | list the plugin directories that are not in your specs |
 | `:Sarcina clean!` | delete them (`:Sarcina! clean` does the same) |
 | `:Sarcina panel` | toggle the window, and go into it |
@@ -258,6 +259,8 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 `check` and `update` take plugin names, completed with Tab, and do every plugin of the manifest without any. They read your specs from disk, like `install`, and show up in the window as `checking` and `updating`.
 
 **`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. It downloads nothing, and names the plugins that are somewhere else. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
+
+**`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`remove`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are skipped with `setup({ confirm = false })`.
 
 **`install`** reads your specs from disk and runs the plan of each plugin that has not loaded in this session: one that is not on disk is cloned (`Installing 1: …`), one that is on disk but did not load, such as a spec you just added, is loaded (`Loading 1: …`), and one a failure stopped before it loaded runs again. Each loads the way its spec says, now, later or on a trigger, so it works without a restart. A plugin that loaded, is waiting for its trigger, or is queued is left alone: its `config` does not run twice, and it does not move (that is `update`). A plugin whose `config` failed after it was on the runtimepath counts as loaded; restart Neovim to run it again.
 
@@ -303,30 +306,38 @@ Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.sn
 
 Four windows make one block, 80% of the editor wide and 80% tall, centered: a header across the top, a footer across the bottom, and between them the list of plugins on the left and the details of the one under the cursor on the right. The list and the details scroll; the header and the footer have windows of their own, so they stay in view.
 
+**Views.** In the `main` view the list takes 70% of the width and the details 30%, which leaves each row room for its status message: on a first install or a build you read git's progress, the build's output and any error as they come. `=` in the list switches to the `split` view, 50/50, for longer details, and back; the footer says what `=` switches to (`= 50/50` or `= 70/30`). The view stays for the rest of the session, and `setup({ ui = { view = 'split' } })` starts in `split`.
+
 ```
-╭──────────────────────────────────────────────────────────────╮
-│ Total: 55 plugins                                            │
-│                        127/210 tasks                         │
-╰──────────────────────────────────────────────────────────────╯
-╭──────────────────────────────────────────╮╭ avante.nvim ────────────────╮
-│ plenary.nvim   (110ms) later   3/3 tasks ✔ ││ state     ✘ failed          │
-│ telescope.nvim (2.1s)  trigger 1/6 tasks ▶ ││ tasks     2/3 tasks ✘       │
-│ blink.cmp      (8ms)   trigger 2/6 tasks ○ ││ timing    later             │
-│ avante.nvim    (120ms) later   2/3 tasks ✘ ││ src       https://github.co │
-│ smart-splits   (62ms)  later   1/3 tasks ⊘ ││ path      ~/.local/share/…  │
-╰──────────────────────────────────────────╯│ rev       5e4e310           │
-╭──────────────────────────────────────────╮│                             │
-│ Now 7, Later 18, Triggered 30            ││ Tasks                       │
-╰──────────── q close · ^d ^u ─────────────╯│ ✔ install 104ms installed   │
-                                            │ ✘ build 12ms make: comm…    │
-                                            ╰─────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Total: 55 plugins                                                                                            │
+│                                                127/210 tasks                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+╭───────────────────────────────────────────────────────────────────────────╮╭ avante.nvim ────────────────────╮
+│ plenary.nvim   (110ms) later   3/3 tasks ✔ loaded                         ││state     ✘ failed               │
+│ telescope.nvim (2.1s)  later   1/6 tasks ▶ installing · Receiving objects…││tasks     2/3 tasks ✘ 120ms      │
+│ blink.cmp      (8ms)   trigger 2/6 tasks ○ waiting for InsertEnter        ││timing    later                  │
+│ avante.nvim    (120ms) later   2/3 tasks ✘ failed · make: command not fou…││src       https://github.com/    │
+│ smart-splits   (62ms)  later   1/3 tasks ⊘ blocked · dependency avante.nv…││          yetone/avante.nvim     │
+│                                                                           ││path      ~/.local/share/nvim/   │
+│                                                                           ││          sarcina/plugins/       │
+│                                                                           ││          avante.nvim            │
+│                                                                           ││rev       5e4e310                │
+│                                                                           ││                                 │
+│                                                                           ││Tasks                            │
+│                                                                           ││ ✔ install 104ms installed       │
+│                                                                           ││ ✘ build 12ms  make: command…    │
+╰───────────────────────────────────────────────────────────────────────────╯╰─────────────────────────────────╯
+╭──────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ Now 7, Later 18, Triggered 30                                                                  Startup: 83ms │
+╰────────────────────────────────────────────────────────────────── q close · = 50/50 · ^d ^u scroll details ──╯
 ```
 
 **The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3/8`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** says how many load now, later and on a trigger, on the left, and the startup time on the right: `Now 7, Later 18, Triggered 30` and `Startup: 83ms`. Both come from `stats.get()`.
 
 **The list** has one row per plugin, in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. So installed `now` plugins come first, since they load before the UI, then the `later` ones as they finish, then triggered ones as they fire.
 
-A row is `name  (load time) when it loads, tasks widget, status message`, for example `plenary.nvim  (110ms) later  3/3 tasks ✔ loaded`. The load time is the run time of all that plugin's tasks added up, not the load alone; a task counts when it ends, and time spent waiting behind the install barrier or a dependency does not. The status message is the state and what it adds, such as git's line or the error: `installing · Receiving objects`, `failed · make: command not found`, `waiting for :Telescope`. It takes what is left of the list after the other columns, so a narrow list drops it and the widget alone still says the state.
+A row is `name  (load time) when it loads, tasks widget, status message`, for example `plenary.nvim  (110ms) later  3/3 tasks ✔ loaded`. The load time is the run time of all that plugin's tasks added up, not the load alone; a task counts when it ends, and time spent waiting behind the install barrier or a dependency does not. The status message is the state and what it adds, such as git's line or the error: `installing · Receiving objects`, `failed · make: command not found`, `waiting for :Telescope`. It takes the rest of the row, so in the `main` view a message of 60 characters or more shows in full on a wide screen. A shorter list, in the `split` view or on a narrow screen, cuts it with `…`, and a list with no room for it drops it, and the widget alone still says the state.
 
 The tasks widget is a button with rounded ends and two tones. The count (`3/8`) is on the colour of the state, in dark bold text, and the label (`tasks` and an icon) is a light tint of it in a darker shade. The icon is the state: `✔` loaded, `○` waiting for its trigger (yellow), `▶` at work, `✘` failed, `⊘` blocked, `…` not started. The colours come from your colorscheme's `DiagnosticOk` (loaded), `DiagnosticInfo` (at work), `DiagnosticWarn` (waiting), `DiagnosticError` (failed) and `Comment` (not started, or blocked), so the widget follows the theme. Each kind has four groups you can override, such as `SarcinaPillDoneLeft`, `SarcinaPillDoneCount`, `SarcinaPillDone` and `SarcinaPillDoneRight`; the same goes for `Running`, `Waiting`, `Failed` and `Idle`. The ends are Powerline glyphs, so they need a patched font (a Nerd Font); with `setup({ ui = { rounded = false } })` the widget has flat ends. The ends set only a foreground, so the cell behind them stays the window's, or the cursor line's, and they look round either way.
 
@@ -345,7 +356,7 @@ The time is the run time of all that plugin's tasks added up, not the load alone
 
 Under a `Tasks` title is one line per task of the plugin's plan: a glyph for its status, the task, its own time right after it in bold, and a note. Each task has a colour of its own (`install`, `before`, `build`, `load_trigger`, `rtp`, `load`, `keys`, `after`, and one for any other id), set by the groups `SarcinaStepInstall`, `SarcinaStepBefore`, `SarcinaStepBuild`, `SarcinaStepTrigger`, `SarcinaStepRtp`, `SarcinaStepLoad`, `SarcinaStepKeys`, `SarcinaStepAfter` and `SarcinaStepOther`, which link to groups a colorscheme colours differently. The time is `SarcinaStepTime`. The install of a plugin that was cloned in an earlier session reads `installed`, with the time it took when that was kept.
 
-With less room than about 105 columns the list takes the whole width and the details pane goes, and the rows keep their detail text. The columns of a row give way to the width in the same order: the detail text, then the state word (the glyph still says it), then the name is cut with `…`. All four windows follow a resize.
+The details pane needs 28 columns and the list 40, which the `main` view has from about 120 editor columns and the `split` view from about 105. With less, the list takes the whole width and the details pane goes, and the rows keep their status message; on a screen between the two, `=` brings the details back. The columns of a row give way to the width in the same order: the detail text, then the state word (the glyph still says it), then the name is cut with `…`. All four windows follow a resize.
 
 The window reads the stats and keeps no task state, so it cannot drift from the engine. An event redraws the row of its plugin, the header and the footer, and the details when they show that plugin. The size is fixed when the window opens, so streaming output never moves it.
 

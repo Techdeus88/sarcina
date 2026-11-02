@@ -33,11 +33,13 @@ end
 --- Call `require('sarcina').setup()` after adding Sarcina to your runtimepath.
 --- Installed `now` plugins load before it returns; the rest runs in the background once the UI is up,
 --- and `require('sarcina.tasks').wait()` blocks until it is done. `opts.ui.show` is when the window opens
---- by itself: 'auto' (default), 'always' or 'never'.
+--- by itself: 'auto' (default), 'always' or 'never'. `opts.confirm = false` skips the question before
+--- `update` and `remove`.
 function M.setup(opts)
     stats.begin()
     opts = opts or {}
     ui.configure(opts.ui)
+    require('sarcina.confirm').configure(opts.confirm)
     ui.init()
 
     -- 1️⃣ Load all plugin specs (auto‑discovers files under lua/plugins/ or custom paths)

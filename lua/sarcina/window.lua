@@ -84,15 +84,15 @@ local STEP_GROUP = {
 }
 
 local NAME_MAX, NAME_MIN, TAG_W = 28, 10, 7
--- The load time sits in brackets after the name: `(0.6ms)` at most `(<0.1ms)`. The status message is what is
--- left of the list after the other columns, up to MESSAGE_W.
-local TIME_COL, MESSAGE_W = 8, 24
+-- The load time sits in brackets after the name: `(0.6ms)` at most `(<0.1ms)`. The status message takes what is
+-- left of the list after the other columns, so git's progress and a build's output show while they run.
+local TIME_COL = 8
 local KEY_W = 9
 -- The window takes 80% of the editor each way: a header across the top, a footer across the bottom, and
--- between them the list and the details, which scroll. The list gets at most 55% of the width, and the
--- details pane only exists when both panes have this much room.
-local SHARE, LIST_MIN, DETAIL_MIN = 0.8, 40, 36
-local LIST_SHARE = 0.55
+-- between them the list and the details, which scroll. The view says how much of the width is the list's: 70% in
+-- `main`, half in `split`. The details pane only exists when both panes have this much room.
+local SHARE, LIST_MIN, DETAIL_MIN = 0.8, 40, 28
+local VIEWS = { main = 0.7, split = 0.5 }
 
 local entries = {} -- line number -> { kind = 'plugin', name = string }
 local line_of = {} -- plugin name -> line number
@@ -121,6 +121,18 @@ local HEADER_OUTER, FOOTER_OUTER = 4, 3
 --- Whether the tasks widget has rounded ends. They are Powerline glyphs, which need a patched font; without
 --- one, set `ui = { rounded = false }` in setup() for flat ends.
 M.rounded = true
+
+--- How the list and the details share the width: 'main' (70/30) or 'split' (50/50).
+M.view = 'main'
+
+--- Whether `name` is a view.
+function M.is_view(name) return VIEWS[name] ~= nil end
+
+--- Switches between the two views. Returns the view now in use.
+function M.toggle_view()
+    M.view = M.view == 'main' and 'split' or 'main'
+    return M.view
+end
 
 local CAP_LEFT, CAP_RIGHT = vim.fn.nr2char(0xe0b6), vim.fn.nr2char(0xe0b4)
 
@@ -337,7 +349,7 @@ local function measure(list)
     view.full_w = view.outer_w - 2
 
     local inner = view.outer_w - 4
-    local list_w = math.min(without_name + name_w + 1 + MESSAGE_W, math.floor(inner * LIST_SHARE))
+    local list_w = math.floor(inner * VIEWS[M.view])
     local detail_w = inner - list_w
     if list_w >= LIST_MIN and detail_w >= DETAIL_MIN then
         view.list_w, view.detail_w = list_w, detail_w

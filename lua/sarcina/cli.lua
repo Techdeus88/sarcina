@@ -13,12 +13,14 @@ local SUBCOMMANDS =
 
 local subcommands = {}
 
-function subcommands.add(args) ui.emit('info', 'Add command not yet implemented: ' .. args) end
-
-function subcommands.remove(args) ui.emit('info', 'Remove command not yet implemented: ' .. args) end
-
 -- The manifest as it is on disk now, resolved.
 local function resolve_manifest() return resolver.resolve(require('sarcina.manifest').load()) end
+
+function subcommands.add(args) ui.emit('info', 'Add command not yet implemented: ' .. args) end
+
+function subcommands.remove(_, args)
+    require('sarcina.remover').run(resolve_manifest(), vim.list_slice(args.fargs, 2))
+end
 
 -- Runs the plans of the plugins that have not loaded in this session (see installer.pending), and says which.
 -- Returns false when there were none.
@@ -139,8 +141,10 @@ end
 -- Subcommand names, and after `check` or `update` the names of the plugins.
 function M.complete(ArgLead, CmdLine)
     local candidates = SUBCOMMANDS
-    if CmdLine and CmdLine:match('^%s*%S+%s+check%s') or CmdLine and CmdLine:match('^%s*%S+%s+update%s') then
+    if CmdLine and (CmdLine:match('^%s*%S+%s+check%s') or CmdLine:match('^%s*%S+%s+update%s')) then
         candidates = vim.tbl_map(function(entry) return entry.name end, require('sarcina.stats').specs())
+    elseif CmdLine and CmdLine:match('^%s*%S+%s+remove%s') then
+        candidates = installer.installed()
     end
     return vim.tbl_filter(function(c) return vim.startswith(c, ArgLead) end, candidates)
 end

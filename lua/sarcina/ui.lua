@@ -80,6 +80,18 @@ function M.configure(opts)
     end
     M.show = show
     window().rounded = not opts or opts.rounded ~= false
+    local view = opts and opts.view or 'main'
+    if not window().is_view(view) then
+        M.emit('warning', string.format('Unknown ui.view %s, using main', tostring(view)))
+        view = 'main'
+    end
+    window().view = view
+end
+
+-- The keys the footer names. `=` says which view it switches to.
+local function hint()
+    local other = window().view == 'main' and '50/50' or '70/30'
+    return ' q close · = ' .. other .. ' · ^d ^u scroll details '
 end
 
 -- Draws the details of the selected plugin and names the details window after it. A different plugin
@@ -174,6 +186,12 @@ local function ensure_buffer()
     window().define_highlights()
     M._bufnr = new_buffer()
     vim.keymap.set('n', 'q', M.dismiss, { buffer = M._bufnr, nowait = true, desc = 'Close Sarcina window' })
+    vim.keymap.set(
+        'n',
+        '=',
+        function() M.toggle_view() end,
+        { buffer = M._bufnr, nowait = true, desc = 'Switch the Sarcina view between 70/30 and 50/50' }
+    )
     for _, key in ipairs({ '<C-d>', '<C-u>' }) do
         vim.keymap.set(
             'n',
@@ -205,7 +223,7 @@ local function open_window(enter)
     vim.wo[M._winid].wrap = false
     vim.wo[M._winid].cursorline = true
     open_pane('header', config.header)
-    open_pane('footer', config.footer, { footer = ' q close · ^d ^u scroll details ', footer_pos = 'right' })
+    open_pane('footer', config.footer, { footer = hint(), footer_pos = 'right' })
     if config.detail then open_detail(config.detail) end
     vim.api.nvim_create_autocmd('WinClosed', {
         pattern = tostring(M._winid),
@@ -345,6 +363,19 @@ function M.dismiss()
     M._dismissed = true
     M._seen_failed = snapshot().counts.failed
     M.close()
+end
+
+--- Switches the window between its views, main (the list 70%, the details 30%) and split (50/50), and redraws
+--- it when it is open. The view stays for the rest of the session.
+function M.toggle_view()
+    window().toggle_view()
+    if not win_valid() then return end
+    window().draw(buffers())
+    apply_config()
+    if pane_valid('footer') then
+        vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'right' })
+    end
+    follow(false, true)
 end
 
 function M.toggle()

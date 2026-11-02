@@ -3,6 +3,7 @@
 -- moved. Each plugin is a `git_update` task in the task engine (see executors.lua), so the window shows it,
 -- and the lock file is rewritten by the run that did it (see lock.lua).
 
+local confirm = require('sarcina.confirm')
 local paths = require('sarcina.paths')
 local pins = require('sarcina.pin')
 local stats = require('sarcina.stats')
@@ -88,7 +89,7 @@ function M.summarize(mode, jobs)
     return table.concat(parts, ' '), (#left > 0 or #failed > 0) and 'warn' or 'info'
 end
 
-local function run(mode, resolved, names)
+local function run(mode, resolved, names, finish)
     local picked = select(resolved, names)
     if not picked then return end
     -- Every plugin of the manifest stays registered, so the numbers and the window keep counting all of them;
@@ -138,7 +139,9 @@ local function run(mode, resolved, names)
         string.format('%s %d plugins...', mode == 'check' and 'Checking' or 'Updating', vim.tbl_count(plans))
     )
     tasks.run_all(function()
-        local text, level = M.summarize(mode, tasks.snapshot().jobs)
+        local jobs = tasks.snapshot().jobs
+        if finish then return finish(jobs) end
+        local text, level = M.summarize(mode, jobs)
         ui.emit(level, text)
     end, { quiet = true })
 end
@@ -146,7 +149,41 @@ end
 --- Fetch what the remote of each plugin has, and say which have an update. `names` picks plugins, none picks all.
 function M.check(resolved, names) run('check', resolved, names or {}) end
 
---- Fetch and move each plugin to it, rebuild what moved, and write the lock file.
-function M.update(resolved, names) run('update', resolved, names or {}) end
+-- The plugins a finished check found a newer commit for, with what to say about each.
+local function available(jobs)
+    local names, lines = {}, {}
+    for _, job in ipairs(jobs) do
+        local change = job.id == 'check'
+            and job.status == 'done'
+            and (job.note or ''):match('^update available (.+)$')
+        if change then
+            table.insert(names, job.plugin)
+            table.insert(lines, job.plugin .. ' ' .. change)
+        end
+    end
+    return names, lines
+end
+
+--- Fetch and move each plugin to it, rebuild what moved, and write the lock file. With the question on, it
+--- checks first and asks before it changes anything, naming the plugins that have a newer commit.
+function M.update(resolved, names)
+    names = names or {}
+    if not confirm.enabled then return run('update', resolved, names) end
+    run('check', resolved, names, function(jobs)
+        local moving, lines = available(jobs)
+        if #moving == 0 then
+            local text, level = M.summarize('check', jobs)
+            return ui.emit(level, text)
+        end
+        local prompt = string.format(
+            'Update %d plugin%s?\n%s',
+            #moving,
+            #moving == 1 and '' or 's',
+            table.concat(lines, '\n')
+        )
+        if not confirm.ask(prompt) then return ui.emit('info', 'Nothing updated') end
+        run('update', resolved, moving)
+    end)
+end
 
 return M

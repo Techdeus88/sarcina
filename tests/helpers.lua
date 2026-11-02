@@ -32,6 +32,7 @@ function M.reset()
     require('sarcina.stats')._reset()
     require('sarcina.window').forget()
     require('sarcina.installs')._reset()
+    require('sarcina.confirm').enabled = false
     require('sarcina.paths').reset_dirs()
     vim.fn.delete(require('sarcina.paths').lock_file())
     require('sarcina.lock')._reset()

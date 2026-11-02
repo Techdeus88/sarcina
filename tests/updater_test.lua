@@ -241,4 +241,57 @@ test('an update leaves doc/tags alone when the plugin commits it', function()
     )
 end)
 
+-- Runs `fn` with the question on and `confirm.ask` answering `answer`; returns the prompts it was asked.
+local function with_question(answer, fn)
+    local confirm = require('sarcina.confirm')
+    local ask, prompts = confirm.ask, {}
+    confirm.enabled = true
+    confirm.ask = function(prompt)
+        table.insert(prompts, prompt)
+        return answer
+    end
+    local ok, err = pcall(fn)
+    confirm.ask, confirm.enabled = ask, false
+    assert(ok, err)
+    return prompts
+end
+
+test('update asks first, naming the newer commit, and moves the plugin on yes', function()
+    local remote = upstream()
+    local dir = clone(remote, 'upask.nvim')
+    advance(remote)
+    local prompts = with_question(true, function()
+        updater.update(resolved({ { name = 'upask.nvim', repo = remote } }))
+        finish()
+        h.ok(vim.wait(5000, function() return head(dir) == head(remote) end, 20))
+        finish()
+    end)
+    h.eq(#prompts, 1)
+    h.ok(prompts[1]:find('Update 1 plugin?', 1, true) and prompts[1]:find('upask.nvim', 1, true), prompts[1])
+end)
+
+test('update leaves the plugin alone on no', function()
+    local remote = upstream()
+    local dir = clone(remote, 'upno.nvim')
+    local before = head(dir)
+    advance(remote)
+    with_question(false, function()
+        updater.update(resolved({ { name = 'upno.nvim', repo = remote } }))
+        finish()
+    end)
+    h.eq(head(dir), before)
+    h.ok(h.notified('Nothing updated'), vim.inspect(h.notes))
+end)
+
+test('update asks nothing when no plugin has a newer commit', function()
+    local remote = upstream()
+    clone(remote, 'upnone.nvim')
+    local prompts = with_question(true, function()
+        updater.update(resolved({ { name = 'upnone.nvim', repo = remote } }))
+        finish()
+    end)
+    h.eq(#prompts, 0)
+    h.ok(h.notified('Everything is up to date'), vim.inspect(h.notes))
+end)
+
 return tests

@@ -149,4 +149,60 @@ test('remove deletes a directory even when it is a link, never what the link poi
     h.eq(vim.fn.readfile(target .. '/file.txt'), { 'precious' })
 end)
 
+local function ask_with(answer)
+    local confirm = require('sarcina.confirm')
+    local ask, prompts = confirm.ask, {}
+    confirm.enabled = true
+    confirm.ask = function(prompt)
+        table.insert(prompts, prompt)
+        return answer
+    end
+    return prompts, function()
+        confirm.ask, confirm.enabled = ask, false
+    end
+end
+
+test(
+    'remove deletes several named plugins in one batch, warning about the ones still in the specs',
+    function()
+        empty_plugins_dir()
+        manifest({ 'rmkept.nvim' })
+        plugin_dir('rmkept.nvim')
+        plugin_dir('rmgone.nvim')
+        local prompts, restore = ask_with(true)
+        vim.cmd('runtime plugin/sarcina.lua')
+        vim.cmd('Sarcina remove rmkept.nvim rmgone.nvim')
+        restore()
+        h.eq(#prompts, 1)
+        h.ok(prompts[1]:find('Remove 2 plugins', 1, true), prompts[1])
+        h.ok(prompts[1]:find('installs again at the next startup: rmkept.nvim', 1, true), prompts[1])
+        h.ok(not prompts[1]:find('startup: rmgone', 1, true), prompts[1])
+        h.eq(exists('rmkept.nvim'), false)
+        h.eq(exists('rmgone.nvim'), false)
+        h.ok(h.notified('Removed 2: rmkept.nvim, rmgone.nvim'), vim.inspect(h.notes))
+    end
+)
+
+test('remove keeps the directory on no, and names a plugin that is not installed', function()
+    empty_plugins_dir()
+    manifest({})
+    plugin_dir('rmno.nvim')
+    local _, restore = ask_with(false)
+    vim.cmd('runtime plugin/sarcina.lua')
+    vim.cmd('Sarcina remove rmno.nvim nothere.nvim')
+    restore()
+    h.eq(exists('rmno.nvim'), true)
+    h.ok(h.notified('Not installed: nothere.nvim'), vim.inspect(h.notes))
+    h.ok(h.notified('Nothing removed'), vim.inspect(h.notes))
+end)
+
+test('remove deletes without a question when confirm is off', function()
+    empty_plugins_dir()
+    manifest({})
+    plugin_dir('rmquiet.nvim')
+    vim.cmd('runtime plugin/sarcina.lua')
+    vim.cmd('Sarcina remove rmquiet.nvim')
+    h.eq(exists('rmquiet.nvim'), false)
+end)
+
 return tests

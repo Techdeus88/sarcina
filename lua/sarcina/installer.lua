@@ -44,25 +44,28 @@ function M.pending(resolved)
     return vim.tbl_filter(function(entry) return not under_way(entry.name) end, resolved)
 end
 
---- The directories in the plugins directory that no plugin of `resolved` owns, by name. Files are not plugins,
---- and a name read from the directory cannot point outside it.
-function M.stale(resolved)
-    local wanted = {}
-    for _, entry in ipairs(resolved) do
-        wanted[entry.name] = true
-    end
+--- The directories in the plugins directory, by name, sorted. Files are not plugins, and a name read from the
+--- directory cannot point outside it.
+function M.installed()
     local found = {}
     local handle = vim.uv.fs_scandir(paths.plugins_dir())
     while handle do
         local name, kind = vim.uv.fs_scandir_next(handle)
         if not name then break end
         local hidden = name:sub(1, 1) == '.' -- sarcina's own, such as .staging
-        if (kind == 'directory' or kind == 'link') and not hidden and not wanted[name] then
-            table.insert(found, name)
-        end
+        if (kind == 'directory' or kind == 'link') and not hidden then table.insert(found, name) end
     end
     table.sort(found)
     return found
+end
+
+--- The installed directories that no plugin of `resolved` owns, by name.
+function M.stale(resolved)
+    local wanted = {}
+    for _, entry in ipairs(resolved) do
+        wanted[entry.name] = true
+    end
+    return vim.tbl_filter(function(name) return not wanted[name] end, M.installed())
 end
 
 --- Delete the plugin directories `names`: off the runtimepath, then from disk, then out of the install times

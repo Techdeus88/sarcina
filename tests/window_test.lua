@@ -63,6 +63,14 @@ local function row_of(name)
     end
 end
 
+-- Runs `fn` in the view `name`, then puts the default view back.
+local function in_view(name, fn)
+    window.view = name
+    local ok, err = pcall(fn)
+    window.view = 'main'
+    if not ok then error(err, 0) end
+end
+
 -- Runs `fn` with the editor at the given size, then puts the size back.
 local function with_size(columns, rows, fn)
     local old_columns, old_lines = vim.o.columns, vim.o.lines
@@ -312,22 +320,94 @@ test(
     end
 )
 
-test('the status message gives way to a narrow list, and the pill still says the state', function()
-    local held = { name = 'a', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
-    h.register({ held })
-    tasks.enqueue('a', held)
-    tasks.run_all()
-    with_size(120, 40, function()
-        h.ok(vim.wait(500, win_open), 'the window never opened')
-        h.ok(vim.wait(500, function() return lines()[1]:find('tasks ▶', 1, true) end), lines()[1])
-        h.eq(ui._detail_winid ~= nil, true)
-        h.ok(
-            not lines()[1]:find('installing', 1, true),
-            'a narrow list has no room for the message: ' .. lines()[1]
-        )
-        release()
-        h.ok(tasks.wait(2000))
+test(
+    'the main view has room for the status message, and in the split view it gives way to the pill',
+    function()
+        local held = { name = 'a', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
+        h.register({ held })
+        tasks.enqueue('a', held)
+        tasks.run_all()
+        with_size(120, 40, function()
+            h.ok(vim.wait(500, win_open), 'the window never opened')
+            h.ok(
+                vim.wait(500, function() return lines()[1]:find('installing · Rec', 1, true) end),
+                lines()[1]
+            )
+            h.eq(ui._detail_winid ~= nil, true)
+            in_view('split', function()
+                ui.open()
+                h.ok(lines()[1]:find('tasks ▶', 1, true), lines()[1])
+                h.ok(
+                    not lines()[1]:find('installing', 1, true),
+                    'half the window has no room for the message: ' .. lines()[1]
+                )
+            end)
+            release()
+            h.ok(tasks.wait(2000))
+        end)
+    end
+)
+
+test('a long status message, such as the error of a build, shows in full in the main view', function()
+    local why = 'make: *** No rule to make target build. Stop.'
+    local broken = { name = 'broken', tasks = { h.lua('build', function() error(why, 0) end) } }
+    h.register({ broken })
+    h.run({ broken })
+    with_size(200, 50, function()
+        ui.open()
+        h.ok(row_of('broken'):find('failed · ' .. vim.pesc(why) .. '%s*$'), row_of('broken'))
     end)
+end)
+
+test(
+    '= switches between 70/30 and 50/50, keeps the plugin under the cursor, and the footer says what = does',
+    function()
+        h.register({ loaded('a'), loaded('b'), loaded('c') })
+        with_size(120, 40, function()
+            ui.open()
+            vim.api.nvim_set_current_win(ui._winid)
+            vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+            vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+            local function widths()
+                return {
+                    vim.api.nvim_win_get_config(ui._winid).width,
+                    vim.api.nvim_win_get_config(ui._detail_winid).width,
+                }
+            end
+            local function footer_hint()
+                local text = vim.api.nvim_win_get_config(ui._footer_winid).footer
+                return type(text) == 'table' and text[1][1] or text
+            end
+            h.eq(widths(), { 64, 28 })
+            h.ok(footer_hint():find('= 50/50', 1, true), footer_hint())
+            vim.api.nvim_feedkeys('=', 'x', false)
+            h.eq(window.view, 'split')
+            h.eq(widths(), { 46, 46 })
+            h.ok(footer_hint():find('= 70/30', 1, true), footer_hint())
+            h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 2)
+            h.eq(window.selected(), 'b')
+            -- The header and the footer keep the whole width.
+            h.eq(vim.api.nvim_win_get_config(ui._header_winid).width + 2, 96)
+            vim.api.nvim_feedkeys('=', 'x', false)
+            h.eq({ window.view, widths() }, { 'main', { 64, 28 } })
+            -- The view stays for the next time the window opens.
+            vim.api.nvim_feedkeys('=', 'x', false)
+            ui.close()
+            ui.open()
+            h.eq(widths(), { 46, 46 })
+            window.view = 'main'
+        end)
+    end
+)
+
+test('ui.view picks the view the window opens in, and an unknown one warns and uses main', function()
+    ui.configure({ view = 'split' })
+    h.eq(window.view, 'split')
+    ui.configure({ view = 'wide' })
+    h.eq(window.view, 'main')
+    h.ok(h.notified('Unknown ui.view wide, using main'), vim.inspect(h.notes))
+    ui.configure(nil)
+    h.eq(window.view, 'main')
 end)
 
 test('the src of a plugin is the URL it is cloned from', function()
@@ -474,7 +554,8 @@ test('four windows are stacked and centered, 80% by 80% of the editor', function
         h.eq(bottom.row + bottom.height + 2 - header.row, 31)
         h.ok(math.abs(2 * header.col + 96 - 120) <= 1, 'not centered across')
         h.ok(math.abs(2 * header.row + 31 - 39) <= 1, 'not centered down')
-        h.ok(list.width <= math.floor(92 * 0.55), 'the list is wider than 55%: ' .. list.width)
+        -- The main view gives the list 70% of the room the panes have, and the details the rest.
+        h.eq({ list.width, detail.width }, { math.floor(92 * 0.7), 92 - math.floor(92 * 0.7) })
         h.eq({ header.focusable, detail.focusable, bottom.focusable }, { false, false, false })
     end)
 end)
