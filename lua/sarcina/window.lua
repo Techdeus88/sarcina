@@ -57,6 +57,8 @@ local HL_LINKS = {
     SarcinaTag = 'Comment',
     SarcinaHeader = 'Title',
     SarcinaFooter = 'Comment',
+    SarcinaPickOn = 'DiagnosticOk',
+    SarcinaPickOff = 'Comment',
     SarcinaStepInstall = 'Function',
     SarcinaStepBefore = 'Special',
     SarcinaStepBuild = 'Constant',
@@ -104,6 +106,7 @@ local names = {} -- plugin names in line order
 local selected = nil -- the plugin the details pane shows
 local revs = {} -- plugin name -> short commit, '' when there is none, false while it is being read
 local details_buf = nil -- the buffer the details were last drawn in
+local marked = {} -- plugin name -> true for the plugins picked in the select view
 -- Fixed at each full draw, so streaming output never resizes the window.
 local view = {
     outer_w = 0, -- the whole window with its borders
@@ -124,6 +127,9 @@ M.rounded = true
 
 --- How the list and the details share the width: 'main' (70/30) or 'split' (50/50).
 M.view = 'main'
+
+--- Whether the list is in the select view: a checkbox in front of every row, and the footer names the picks.
+M.select_mode = false
 
 --- Whether the details show the changelog of a plugin that has an update, instead of its tasks.
 M.changelog = false
@@ -293,6 +299,13 @@ local function status_message(row)
     return row.state .. ' · ' .. detail
 end
 
+-- The three cells in front of a name: a plain indent, or in the select view a box that is checked for a pick.
+local function lead_parts(name)
+    if not M.select_mode then return { { INDENT } } end
+    if marked[name] then return { { ' ' }, { '✔', 'SarcinaPickOn' }, { ' ' } } end
+    return { { ' ' }, { '○', 'SarcinaPickOff' }, { ' ' } }
+end
+
 -- A row: `name (load time) when it loads <done>/<all> tasks pill status message`, one space apart. The status
 -- message takes what is left of the list, so git's progress and a build's output show while they run. Without
 -- room for a few characters of it the message goes, and only then is the name cut.
@@ -303,8 +316,10 @@ local function row_line(row)
     if row.timing then vim.list_extend(after, { { ' ' }, { row.timing, 'SarcinaTag' } }) end
     table.insert(after, { ' ' })
     vim.list_extend(after, pill_parts(row.task, row.tasks, row.state))
-    local name = fit(row.name, math.max(view.list_w - #INDENT - parts_width(after), NAME_MIN))
-    local parts = { { INDENT }, { name, 'SarcinaName' } }
+    local lead = lead_parts(row.name)
+    local name = fit(row.name, math.max(view.list_w - parts_width(lead) - parts_width(after), NAME_MIN))
+    local parts = lead
+    table.insert(parts, { name, 'SarcinaName' })
     vim.list_extend(parts, after)
     local left = view.list_w - parts_width(parts) - 1
     if left >= 4 then
@@ -454,16 +469,50 @@ local function header_lines()
     }
 end
 
--- How many plugins load now, later and on a trigger, on the left, and the startup time on the right.
+-- A pick as a small pill in the colour of a loaded plugin: a check, then the name.
+local function chip_parts(name)
+    local parts = {}
+    if M.rounded then table.insert(parts, { CAP_LEFT, 'SarcinaPillDoneLeft' }) end
+    table.insert(parts, { ' ✔ ', 'SarcinaPillDoneCount' })
+    table.insert(parts, { ' ' .. name .. ' ', 'SarcinaPillDone' })
+    if M.rounded then table.insert(parts, { CAP_RIGHT, 'SarcinaPillDoneRight' }) end
+    return parts
+end
+
+-- What the footer says on the left: the picks of the select view as pills, as many as fit, then `+N`. Outside the
+-- select view, a pointer to it.
+local function picks_parts(room)
+    if not M.select_mode then return { { ' v to select plugins', 'SarcinaFooter' } } end
+    local picked = M.marked()
+    if #picked == 0 then return { { ' Space picks a plugin · v leaves', 'SarcinaFooter' } } end
+    local parts = { { ' Selected ', 'SarcinaFooter' }, { tostring(#picked), 'SarcinaStepTime' }, { ' ' } }
+    local used = parts_width(parts)
+    for i, name in ipairs(picked) do
+        local chip = chip_parts(name)
+        local more = #picked - i
+        local tail = more > 0 and width_of(' +' .. more) or 0
+        if used + 1 + parts_width(chip) + tail > room then
+            table.insert(parts, { ' +' .. (#picked - i + 1), 'SarcinaFooter' })
+            return parts
+        end
+        table.insert(parts, { ' ' })
+        vim.list_extend(parts, chip)
+        used = used + 1 + parts_width(chip)
+    end
+    return parts
+end
+
+-- The picks on the left and the startup time on the right.
 local function footer_lines()
     local numbers = stats.get()
-    local left =
-        string.format(' Now %d, Later %d, Triggered %d', numbers.now, numbers.later, numbers.triggered)
     local right = numbers.startup_ms and string.format('Startup: %.0fms ', numbers.startup_ms)
         or 'Startup: … '
-    local gap = view.full_w - width_of(left) - width_of(right)
-    if gap < 1 then return { build_line({ { fit(left, view.full_w), 'SarcinaFooter' } }) } end
-    return { build_line({ { left, 'SarcinaFooter' }, { string.rep(' ', gap) }, { right, 'SarcinaFooter' } }) }
+    local left = picks_parts(view.full_w - width_of(right) - 1)
+    local gap = view.full_w - parts_width(left) - width_of(right)
+    if gap < 1 then return { build_line(left) } end
+    table.insert(left, { string.rep(' ', gap) })
+    table.insert(left, { right, 'SarcinaFooter' })
+    return { build_line(left) }
 end
 
 -- Fixes the sizes from the editor: the window is 80% by 80% of it. With room for it the details get a pane of
@@ -532,6 +581,9 @@ function M.draw(bufs, list)
     put(bufs.list, NS, 1, vim.api.nvim_buf_line_count(bufs.list), #lines > 0 and lines or { build_line({}) })
     put_chrome(bufs)
     if not (selected and line_of[selected]) then selected = names[1] end
+    for name in pairs(marked) do
+        if not line_of[name] then marked[name] = nil end
+    end
 end
 
 --- Redraws the rows of the plugins in `dirty` (a set of names), the header and the footer. Draws everything
@@ -607,6 +659,29 @@ function M.entry_at(lnum) return entries[lnum] end
 
 --- The line a plugin is on, or nil.
 function M.line(name) return line_of[name] end
+
+--- The picked plugins, in list order. After a draw, a plugin that left the list is no longer picked.
+function M.marked()
+    local picked = {}
+    for _, name in ipairs(names) do
+        if marked[name] then table.insert(picked, name) end
+    end
+    return picked
+end
+
+--- Enters or leaves the select view. Leaving it drops every pick.
+function M.toggle_select_mode()
+    M.select_mode = not M.select_mode
+    if not M.select_mode then marked = {} end
+end
+
+--- Picks `name`, or drops it when it was picked. Only in the select view.
+function M.toggle_mark(name)
+    if M.select_mode and name then marked[name] = not marked[name] or nil end
+end
+
+--- Drops every pick but stays in the select view.
+function M.clear_marks() marked = {} end
 
 --- The plugin the details show.
 function M.selected() return selected end

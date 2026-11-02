@@ -95,7 +95,8 @@ end
 -- The keys the footer names. `=` says which view it switches to.
 local function hint()
     local other = window().view == 'main' and '50/50' or '70/30'
-    return ' q close · = ' .. other .. ' · C check · ^d ^u scroll details '
+    if window().select_mode then return ' v done · Space pick · c u i l d act on picks · ^d ^u scroll ' end
+    return ' q close · = ' .. other .. ' · v select · C check · U update · ^d ^u scroll details '
 end
 
 -- Draws the details of the selected plugin and names the details window after it. A different plugin
@@ -196,8 +197,11 @@ local ACTIONS = {
     d = { 'delete', true, 'Delete the plugin under the cursor' },
 }
 
--- The plugins on the lines the cursor is on, or the lines a visual selection covers, in list order.
+-- The plugins the keys act on: the picks of the select view, else the lines the cursor is on, or a visual
+-- selection covers, in list order.
 local function plugins_in_selection()
+    local picked = window().marked()
+    if #picked > 0 then return picked end
     local first, last = vim.fn.line('.'), vim.fn.line('.')
     if vim.fn.mode():match('^[vV\22]') then
         first, last = math.min(first, vim.fn.line('v')), math.max(first, vim.fn.line('v'))
@@ -208,6 +212,38 @@ local function plugins_in_selection()
         if entry then table.insert(names, entry.name) end
     end
     return names
+end
+
+local function refresh_select()
+    if not win_valid() then return end
+    -- The cursor may have moved since the last CursorMoved ran; the redraw keeps the cursor on the selection.
+    window().select(vim.api.nvim_win_get_cursor(M._winid)[1])
+    window().draw(buffers())
+    if pane_valid('footer') then
+        vim.api.nvim_win_set_config(pane_win('footer'), { footer = hint(), footer_pos = 'right' })
+    end
+    follow(false, true)
+end
+
+--- `v`: enters the select view, or leaves it and drops every pick.
+function M.toggle_select()
+    window().toggle_select_mode()
+    refresh_select()
+end
+
+--- Leaves the select view, as after an action on the picks.
+function M.leave_select()
+    if window().select_mode then M.toggle_select() end
+end
+
+--- `Space`: picks the plugin under the cursor, or drops it. Only in the select view.
+function M.toggle_pick()
+    local lnum = vim.api.nvim_win_get_cursor(M._winid)[1]
+    local entry = window().entry_at(lnum)
+    if not (entry and entry.kind == 'plugin') then return end
+    window().select(lnum)
+    window().toggle_mark(entry.name)
+    refresh_select()
 end
 
 local function map_actions(buf)
@@ -222,6 +258,7 @@ local function map_actions(buf)
                 vim.list_extend(fargs, names)
             end
             require('sarcina.cli').dispatch({ fargs = fargs, bang = false })
+            if selected and window().select_mode then M.leave_select() end
         end
         vim.keymap.set({ 'n', 'x' }, key, run, { buffer = buf, nowait = true, desc = desc })
     end
@@ -247,6 +284,8 @@ local function ensure_buffer()
         desc = 'Show the changelog of a Sarcina update, or its tasks',
     })
     map_actions(M._bufnr)
+    vim.keymap.set('n', 'v', M.toggle_select, { buffer = M._bufnr, nowait = true, desc = 'Toggle the select view' })
+    vim.keymap.set('n', '<Space>', M.toggle_pick, { buffer = M._bufnr, nowait = true, desc = 'Pick a plugin' })
     for _, key in ipairs({ '<C-d>', '<C-u>' }) do
         vim.keymap.set(
             'n',

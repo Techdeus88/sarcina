@@ -308,6 +308,8 @@ Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.sn
 
 Four windows make one block, 80% of the editor wide and 80% tall, centered: a header across the top, a footer across the bottom, and between them the list of plugins on the left and the details of the one under the cursor on the right. The list and the details scroll; the header and the footer have windows of their own, so they stay in view.
 
+**Select view.** `v` in the list opens it: every row gets a checkbox, `○` and `✔` once picked, and `Space` picks or drops the plugin under the cursor. The footer lists the picks as pills, `Selected 2 ✔ cmp ✔ lsp`, and ends in `+N` when they do not all fit. The keys below then act on every pick, and leave the view when they do. `v` again leaves it and drops every pick. `Space` does nothing outside the view.
+
 **Keys.** In the list, a lowercase key acts on the plugin under the cursor, or on every plugin in a visual selection, so `Vjjd` deletes three at once. `c` checks, `u` updates, `i` installs, `l` loads and `d` deletes; each runs the command of the same name, so `u` and `d` ask first. `C` and `U` check and update every plugin.
 
 **Views.** In the `main` view the list takes 70% of the width and the details 30%, which leaves each row room for its status message: on a first install or a build you read git's progress, the build's output and any error as they come. `=` in the list switches to the `split` view, 50/50, for longer details, and back; the footer says what `=` switches to (`= 50/50` or `= 70/30`). The view stays for the rest of the session, and `setup({ ui = { view = 'split' } })` starts in `split`.
@@ -334,11 +336,11 @@ Four windows make one block, 80% of the editor wide and 80% tall, centered: a he
 │   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││                                │
 ╰──────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────╯
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
-│ Now 1, Later 4, Triggered 1                                                                  Startup: 83ms │
+│ v to select plugins                                                                          Startup: 83ms │
 ╰────────────────────────────────────────────────────── q close · = 50/50 · C check · ^d ^u scroll details ──╯
 ```
 
-**The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3/8`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** says how many load now, later and on a trigger, on the left, and the startup time on the right: `Now 7, Later 18, Triggered 30` and `Startup: 83ms`. Both come from `stats.get()`.
+**The header** says how many plugins there are, `Total: 55 plugins`, and below it, centered, how far all their tasks have got together, `127/210 tasks`. That is the left numbers of the rows (`3/8`) added up over their right numbers, so it counts up in real time as the rows do, and it only reaches the total when every task of every plugin is done, the ones a trigger holds back included. **The footer** has the startup time on the right, `Startup: 83ms`, and on the left the picks of the select view (below), or `v to select plugins` when there is none. The header and the startup time come from `stats.get()`; the counts per timing are in the section headers.
 
 **The list** has a section per timing, `Now`, `Later` and `Triggered`, each under a header with its count (`Later (18)`) and a blank line before the next; a section with no plugins is left out. Within a section the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. The cursor moves over the headers too; on one the details keep the last plugin.
 

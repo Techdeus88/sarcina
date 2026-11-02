@@ -140,7 +140,7 @@ test('a running row shows its work, and the details show its output, until it is
     end)
 end)
 
-test('the header counts the plugins and the footer is how many load when, with the startup time', function()
+test('the header counts the plugins and the footer points at the select view, with the startup time', function()
     local plugins = {
         { name = 'slow', tasks = { { id = 'rtp', type = 'w_slow' } } },
         loaded('fast'),
@@ -151,13 +151,10 @@ test('the header counts the plugins and the footer is how many load when, with t
     with_size(200, 50, function()
         ui.open()
         h.eq(header_text(), ' Total: 3 plugins')
-        local numbers = stats.get()
         local got = footer()
         h.eq(#got, 1)
-        local left =
-            string.format(' Now %d, Later %d, Triggered %d', numbers.now, numbers.later, numbers.triggered)
-        h.eq({ numbers.now, numbers.later, numbers.triggered }, { 1, 2, 0 })
-        h.ok(vim.startswith(got[1], left), got[1])
+        h.ok(vim.startswith(got[1], ' v to select plugins'), got[1])
+        h.ok(not got[1]:find('Now %d'), 'the timing numbers are in the sections: ' .. got[1])
         h.ok(got[1]:find('%s+Startup: [%d…]'), got[1])
         h.ok(not got[1]:find('slowest', 1, true), 'the slowest plugins are gone: ' .. got[1])
     end)
@@ -1123,5 +1120,71 @@ test(
         h.eq(sent, { { 'update', 'kb' }, { 'update' }, { 'load', 'kb' }, { 'delete', 'kb', 'kc' } })
     end
 )
+
+test('v opens the select view, Space picks, the footer names the picks, and v leaves and drops them', function()
+    local plugins = {}
+    for _, name in ipairs({ 'sa', 'sb', 'sc' }) do
+        table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
+    end
+    h.register(plugins)
+    h.run(plugins)
+    with_size(200, 50, function()
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
+        local function row(name)
+            for _, line in ipairs(lines()) do
+                if line:find(name, 1, true) then return line end
+            end
+        end
+        press('<Space>') -- outside the select view it does nothing
+        h.eq(window.marked(), {})
+        press('v')
+        h.ok(row('sa'):find('^ ○ sa'), row('sa'))
+        h.ok(footer()[1]:find('Space picks a plugin', 1, true), footer()[1])
+        vim.api.nvim_win_set_cursor(ui._winid, { window.line('sa'), 0 })
+        press('<Space>')
+        vim.api.nvim_win_set_cursor(ui._winid, { window.line('sc'), 0 })
+        press('<Space>')
+        h.eq(window.marked(), { 'sa', 'sc' })
+        h.ok(row('sa'):find('^ ✔ sa'), row('sa'))
+        h.ok(row('sb'):find('^ ○ sb'), row('sb'))
+        h.ok(footer()[1]:find('Selected 2', 1, true) and footer()[1]:find(' sa ', 1, true), footer()[1])
+        press('<Space>') -- on a picked row it drops the pick
+        h.eq(window.marked(), { 'sa' })
+        press('v')
+        h.eq(window.marked(), {})
+        h.ok(row('sa'):find('^   sa'), row('sa'))
+        h.ok(vim.startswith(footer()[1], ' v to select plugins'), footer()[1])
+    end)
+end)
+
+test('the action keys act on the picks of the select view, and leave it', function()
+    local plugins = {}
+    for _, name in ipairs({ 'pa', 'pb', 'pc' }) do
+        table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
+    end
+    h.register(plugins)
+    h.run(plugins)
+    local cli = require('sarcina.cli')
+    local dispatch, sent = cli.dispatch, {}
+    cli.dispatch = function(args) table.insert(sent, args.fargs) end
+    with_size(200, 50, function()
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
+        press('v')
+        for _, name in ipairs({ 'pa', 'pc' }) do
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line(name), 0 })
+            press('<Space>')
+        end
+        vim.api.nvim_win_set_cursor(ui._winid, { window.line('pb'), 0 })
+        press('u')
+        h.eq(window.select_mode, false)
+        h.eq(window.marked(), {})
+    end)
+    cli.dispatch = dispatch
+    h.eq(sent, { { 'update', 'pa', 'pc' } })
+end)
 
 return tests
