@@ -17,6 +17,9 @@ end
 
 --- Normalize a spec's event/ft/cmd/keys into lists. Returns nil when it has none.
 function M.triggers(spec)
+    -- lazy.nvim's VeryLazy is the moment after startup, which is when a `later` plugin loads anyway.
+    local events = as_list(spec.event)
+    if events and vim.tbl_contains(events, 'VeryLazy') then return nil end
     local triggers = {
         event = as_list(spec.event),
         ft = as_list(spec.ft),
@@ -41,9 +44,10 @@ local function lua_task(id, value, opts)
     return task
 end
 
--- Clones the plugin's repo. Specs without a repo (local plugins) have nothing to install.
+-- Clones the plugin's repo. A spec without a repo, or with a `dir` of its own, is a local plugin and has
+-- nothing to install.
 local function install_task(spec)
-    if not spec.repo then return nil end
+    if not spec.repo or spec.dir then return nil end
     return { id = 'install', type = 'git_clone', repo = spec.repo, phase = 'install' }
 end
 
@@ -82,10 +86,12 @@ local function candidate_names(spec)
     return names
 end
 
--- `config` wins. Otherwise `opts` or `main` requires the plugin's main module and calls setup(opts).
+-- `config` wins. Otherwise `opts` or `main` requires the plugin's main module and calls setup(opts), and so
+-- does `config = true`, even with no opts, as in lazy.nvim.
 local function load_task(spec)
-    if spec.config then return lua_task('load', spec.config, spec.opts) end
-    if spec.main == nil and spec.opts == nil then return nil end
+    local call_setup = spec.config == true
+    if spec.config and not call_setup then return lua_task('load', spec.config, spec.opts) end
+    if not call_setup and spec.main == nil and spec.opts == nil then return nil end
     local main, names = spec.main, candidate_names(spec)
     return lua_task('load', function(plugin, opts)
         local module = main
@@ -95,9 +101,9 @@ local function load_task(spec)
             if not module then error(err, 0) end
         end
         local loaded = require(module)
-        if opts ~= nil then
+        if opts ~= nil or call_setup then
             if type(loaded) ~= 'table' or type(loaded.setup) ~= 'function' then
-                error(module .. ' has no setup() to receive opts', 0)
+                error(module .. ' has no setup() to ' .. (opts ~= nil and 'receive opts' or 'call'), 0)
             end
             loaded.setup(opts)
         end

@@ -34,7 +34,7 @@ local function select(resolved, names)
     return vim.tbl_filter(function(entry) return picked[entry.name] end, resolved)
 end
 
-local function installed(entry) return vim.uv.fs_stat(entry.spec.dest or paths.install(entry.name)) ~= nil end
+local function installed(entry) return vim.uv.fs_stat(paths.install(entry.name)) ~= nil end
 
 -- A plugin's tasks for the run: the fetch, and for an update the plugin's own build, which `per_commit` runs
 -- only when the plugin moved. The fetches start together and every build waits for all of them.
@@ -84,9 +84,12 @@ local function run(mode, resolved, names)
     if not picked then return end
     -- Every plugin of the manifest stays registered, so the numbers and the window keep counting all of them;
     -- the ones in this run get the plan of the run.
-    local plans, missing = {}, {}
+    local plans, missing, local_plugins = {}, {}, {}
     for _, entry in ipairs(picked) do
-        if installed(entry) then
+        -- A plugin with a `dir` is a working copy of yours, so its remote is never pulled into it.
+        if entry.spec.dir then
+            table.insert(local_plugins, entry.name)
+        elseif installed(entry) then
             plans[entry.name] = plan(entry, mode)
         else
             table.insert(missing, entry.name)
@@ -107,6 +110,12 @@ local function run(mode, resolved, names)
                 .. ': '
                 .. table.concat(missing, ', ')
                 .. '. Run :Sarcina install.'
+        )
+    end
+    if #local_plugins > 0 and #names > 0 then
+        ui.emit(
+            'warn',
+            'Local plugins are not ' .. PAST[mode] .. ': ' .. table.concat(local_plugins, ', ') .. '.'
         )
     end
     if vim.tbl_isempty(plans) then return end

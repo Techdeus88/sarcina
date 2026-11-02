@@ -187,4 +187,58 @@ test('the summary says what moved, what was left alone and what failed, and at w
     )
 end)
 
+test('a local plugin, one with a dir, is never fetched into, and is named when you ask for it', function()
+    local remote = upstream()
+    local dir = clone(remote, 'uplocal-src')
+    local before = head(dir)
+    advance(remote)
+    updater.update(resolved({ { name = 'uplocal.nvim', repo = remote, dir = dir } }), { 'uplocal.nvim' })
+    h.ok(h.notified('Local plugins are not updated: uplocal.nvim.'), vim.inspect(h.notes))
+    h.eq(tasks.snapshot().total, 0)
+    h.eq(head(dir), before)
+end)
+
+-- Puts a help file with the topics `topics` in the repo `dir`, and commits it.
+local function add_help(dir, topics)
+    vim.fn.mkdir(dir .. '/doc', 'p')
+    local lines = { '*plug.txt*  A plugin', '' }
+    for _, topic in ipairs(topics) do
+        table.insert(lines, 'About *' .. topic .. '* here.')
+    end
+    vim.fn.writefile(lines, dir .. '/doc/plug.txt')
+    git(dir, 'add', '-A')
+    git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'docs')
+end
+
+local function tags_of(name) return table.concat(vim.fn.readfile(paths.install(name) .. '/doc/tags'), '\n') end
+
+test('a clone makes its help findable at once, and an update makes the new topics findable', function()
+    local remote = upstream()
+    add_help(remote, { 'helpone-topic' })
+    local install = { id = 'install', type = 'git_clone', repo = 'file://' .. remote, phase = 'install' }
+    h.eq(h.run({ { name = 'helpclone.nvim', tasks = { install } } }).failed, 0)
+    h.ok(tags_of('helpclone.nvim'):find('helpone-topic', 1, true), 'a clone has no tags')
+    add_help(remote, { 'helpone-topic', 'helptwo-topic' })
+    updater.update(resolved({ { name = 'helpclone.nvim', repo = 'file://' .. remote } }))
+    finish()
+    h.ok(tags_of('helpclone.nvim'):find('helptwo-topic', 1, true), 'an update left the tags as they were')
+end)
+
+test('an update leaves doc/tags alone when the plugin commits it', function()
+    local remote = upstream()
+    add_help(remote, { 'committed-topic' })
+    vim.fn.writefile({ 'committed-topic\tplug.txt\t/*committed-topic*' }, remote .. '/doc/tags')
+    git(remote, 'add', '-A')
+    git(remote, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', 'tags')
+    clone(remote, 'helpkept.nvim')
+    advance(remote)
+    updater.update(resolved({ { name = 'helpkept.nvim', repo = remote } }))
+    finish()
+    h.eq(head(paths.install('helpkept.nvim')), head(remote))
+    h.eq(
+        vim.fn.readfile(paths.install('helpkept.nvim') .. '/doc/tags'),
+        { 'committed-topic\tplug.txt\t/*committed-topic*' }
+    )
+end)
+
 return tests

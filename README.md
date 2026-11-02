@@ -58,15 +58,17 @@ return {
 | `repo`, or the first entry | what to clone |
 | `name` | plugin name; derived from the repo when missing |
 | `deps` | plugins that must finish first |
-| `load` | when the plugin loads: `'now'`, `'now_if_args'` or `'later'` (the default). `lazy = false` means `'now'` |
+| `enabled`, `cond` | switch a plugin off with `false`, or with a function that returns false. The function gets the spec, and one that raises leaves the plugin on, with a warning. A plugin that is off is not installed, not loaded, listed by `clean`, and dropped from the `deps` of the others |
+| `dir` | a plugin that lives in a directory of its own, such as one you are working on: `dir = '~/code/my.nvim'`. It is not cloned, and `check` and `update` never touch it. Without a `dir` a plugin is cloned into the plugins directory |
+| `load` | when the plugin loads: `'now'`, `'now_if_args'` or `'later'` (the default). `lazy = false` means `'now'`. `event = 'VeryLazy'`, from lazy.nvim, means `'later'`, since that is the moment after startup |
 | `init`, `build`, `after` | `init` runs right after the install, `build` after that, and `after` once the plugin has loaded. A function is called with `plugin = { name, dir }`; a `build` function may take a second parameter, `done`, to run async (see below). A string is a Lua chunk, except that a `build` string is a shell command run in the plugin directory (`build = 'make'`), and any string starting with `:` is an Ex command (`build = ':TSUpdate'`). `build` runs only after a fresh clone or when the plugin's commit changes |
-| `config` | called as `config(plugin, opts)` with `plugin = { name, dir }` |
+| `config` | called as `config(plugin, opts)` with `plugin = { name, dir }`. `config = true` calls `require(module).setup(opts)`, with `opts` or without, as in lazy.nvim |
 | `opts` | a table, or a `function(plugin, opts)` that returns one or fills in the empty table it is given. Handed to `config(plugin, opts)`, or to `require(module).setup(opts)` when there is no `config` |
 | `main` | the module to require; found from the plugin name when missing |
 | `event`, `ft`, `cmd`, `keys` | triggers: the plugin loads when one fires. A `keys` entry is `'lhs'` or `{ lhs, rhs, mode = 'n', desc = ..., <keymap options> }`; with an `rhs`, sarcina defines the mapping when the plugin loads |
 | `tasks` | an explicit task list, which skips the generated one |
 
-Every plugin is cloned to `stdpath('data')/sarcina/plugins/<name>`. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs. For a `now` plugin that is inside `setup()`, so Neovim sources its `plugin/` files in its own startup pass.
+Every plugin without a `dir` is cloned to `stdpath('data')/sarcina/plugins/<name>`, and its `doc/` gets a `doc/tags` after the clone, after an update and when it loads, so `:help` finds it. A `doc/tags` that a plugin commits is left as it is. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs. For a `now` plugin that is inside `setup()`, so Neovim sources its `plugin/` files in its own startup pass.
 
 A `build` that succeeds records the plugin's commit in `.git/sarcina-build` inside the plugin directory, and later runs skip it while `HEAD` still matches (`build` shows `up to date`). A new commit from an update or a manual `git pull` runs it again. A build that fails leaves no record, so it runs again on the next launch. To force a rebuild, delete that file.
 
@@ -151,7 +153,7 @@ A spec with `event`, `ft`, `cmd` or `keys` is triggered: it loads when one fires
 - Afterwards the trigger replays. A command runs again with its args, bang and range. A key is fed again. An event runs only the autocmds the plugin added, so other plugins' handlers do not fire twice.
 - `event` takes `'BufRead'` or `'User Foo'`, with an optional pattern after the event name.
 
-Only the plugin's `plugin/` and `after/plugin/` files are sourced on a late load. `ftplugin`, `ftdetect` and `syntax` files take effect from the next buffer.
+On a late load the plugin's `ftdetect/` scripts are sourced too, in the `filetypedetect` group, and then its `plugin/` and `after/plugin/` files. `ftplugin`, `indent` and `syntax` files take effect from the next buffer of their filetype. Buffers that are already open keep the filetype they have.
 
 ## Stats
 
@@ -235,7 +237,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 **`update`** fetches the default branch of each plugin (`git fetch --depth 1`), and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
 
-**`clean`** compares the directories in `stdpath('data')/sarcina/plugins` with the plugins of your specs, dependencies included. It refuses when the manifest is empty or does not resolve, so a spec that failed to load cannot make every plugin look removable. `clean!` also takes the plugin off `runtimepath` and out of the install times and the lock file. A plugin whose spec sets `dest` lives elsewhere and is never touched.
+**`clean`** compares the directories in `stdpath('data')/sarcina/plugins` with the plugins of your specs, dependencies included. It refuses when the manifest is empty or does not resolve, so a spec that failed to load cannot make every plugin look removable. `clean!` also takes the plugin off `runtimepath` and out of the install times and the lock file. A plugin whose spec sets `dir` lives elsewhere and is never touched.
 
 ### Lock file
 
@@ -253,6 +255,7 @@ It is rewritten after any run that cloned or updated a plugin, and only the plug
 
 - Tasks for one plugin run in order. Plugins run in parallel, up to `tasks.max_concurrent` (default 4).
 - Installs go first. Every `install` task starts at once, whatever its plugin depends on, up to `tasks.max_installs` (default 8). No other task starts until all installs have finished. Then the rest of each plugin's tasks run, dependencies first, and the `now` plugins are queued ahead of the others, so they start first.
+- Git never asks a question. Every clone and fetch runs with `GIT_TERMINAL_PROMPT=0`, so a repo it cannot find, such as a typo in `owner/repo`, fails at once with git's message instead of waiting for a username in your terminal. A transfer that stays under 1 KB/s for a minute is dropped, and no git command runs longer than 10 minutes (`require('sarcina.executors').git_timeout`, in milliseconds), so one bad plugin cannot hold the install barrier.
 - A plugin starts only after the plugins in its `deps` have finished.
 - If a task fails, the rest of that plugin's tasks and every plugin that depends on it are marked `skipped`.
 - A task with `retries = n` runs up to `n + 1` times before it counts as failed.
@@ -305,7 +308,7 @@ The time is the run time of all that plugin's tasks added up, not the load alone
 | Key | Is |
 | --- | --- |
 | `state`, `tasks`, `timing` | what the row says, with the plugin's total time |
-| `src`, `path` | the `repo` as written, and the directory it is cloned to (`dest`, or the default) |
+| `src`, `path` | the `repo` as written, and the directory it lives in (`dir`, or where it was cloned) |
 | `rev` | the short commit in that directory, read in the background |
 | `deps`, `triggers`, `armed` | what it needs, what loads it, and whether that is still `waiting`, `loading`, `loaded` or `failed` |
 | `origin` | the spec file it came from |

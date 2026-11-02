@@ -497,8 +497,6 @@ function M.closed() selected = nil end
 --- Forget the commits that were read: a fresh run may have cloned or updated plugins.
 function M.forget() revs = {} end
 
-local function location(name, spec) return spec and spec.dest or paths.install(name) end
-
 -- The short commit of a plugin, read in the background. Asks for the details to be drawn again when it is in.
 local function rev_of(name, dir)
     if revs[name] ~= nil then return revs[name] or '…' end
@@ -536,7 +534,7 @@ function M.draw_details(buf)
     local lines = {}
     if row then
         local spec = (stats.spec(selected) or {}).spec or {}
-        local dir = location(selected, spec)
+        local dir = paths.install(selected)
         local function add(key, value, group)
             if value == nil or value == '' then return end
             table.insert(lines, build_line({ { pad(key, KEY_W + 1), 'SarcinaTag' }, { value, group } }))

@@ -202,4 +202,53 @@ test('opts fail when the main module has no setup', function()
     h.ok(err:find('has no setup()', 1, true), err)
 end)
 
+test(
+    'a plugin with a dir has nothing to install, even with a repo',
+    function() h.eq(h.ids(factory.generate({ repo = 'x/y', dir = '/somewhere/y' })), { 'rtp' }) end
+)
+
+test('event = VeryLazy makes no triggers', function()
+    h.eq(factory.triggers({ event = 'VeryLazy' }), nil)
+    h.eq(factory.triggers({ event = { 'BufRead', 'VeryLazy' }, cmd = 'X' }), nil)
+    h.eq(factory.triggers({ event = 'BufRead' }), { event = { 'BufRead' } })
+end)
+
+-- A plugin on disk whose main module counts the calls to its setup() and keeps what it was given.
+local function counting_plugin(name)
+    h.plugin_dir({
+        [name] = 'local M = {}\nfunction M.setup(opts) _G.cfg_calls = (_G.cfg_calls or 0) + 1; _G.cfg_opts = opts end\nreturn M',
+    }, require('sarcina.paths').install(name .. '.nvim'))
+end
+
+test('config = true calls setup of the main module, with the opts or none', function()
+    counting_plugin('cfgtrue')
+    h.eq(h.ids(factory.generate({ name = 'cfgtrue.nvim', config = true })), { 'rtp', 'load' })
+    _G.cfg_calls, _G.cfg_opts = nil, nil
+    h.eq(
+        h.run({
+            { name = 'cfgtrue.nvim', tasks = factory.generate({ name = 'cfgtrue.nvim', config = true }) },
+        }).failed,
+        0
+    )
+    h.eq({ _G.cfg_calls, _G.cfg_opts }, { 1 })
+    _G.cfg_calls, _G.cfg_opts = nil, nil
+    local with_opts = factory.generate({ name = 'cfgtrue.nvim', config = true, opts = { a = 1 } })
+    h.eq(h.run({ { name = 'cfgtrue.nvim', tasks = with_opts } }).failed, 0)
+    h.eq({ _G.cfg_calls, _G.cfg_opts }, { 1, { a = 1 } })
+end)
+
+test('config = true on a module with no setup fails the load and says so', function()
+    h.plugin_dir({ nosetup = 'return {}' }, require('sarcina.paths').install('nosetup.nvim'))
+    h.eq(
+        h.run({
+            { name = 'nosetup.nvim', tasks = factory.generate({ name = 'nosetup.nvim', config = true }) },
+        }).failed,
+        1
+    )
+    h.ok(
+        h.job('nosetup.nvim', 'load').error:find('has no setup() to call', 1, true),
+        h.job('nosetup.nvim', 'load').error
+    )
+end)
+
 return tests

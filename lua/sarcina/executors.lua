@@ -12,6 +12,24 @@ local uv = vim.uv
 
 local M = {}
 
+-- Git must never ask a question. With a terminal it would read the answer from the one Neovim is using, and a
+-- repo it cannot find (a typo in owner/repo makes GitHub ask for a username) would hold every task behind the
+-- install barrier. A transfer that stays under 1 KB/s for a minute is dropped, and no git command runs
+-- longer than `git_timeout` ms, a field so that tests can shorten it.
+M.git_timeout = 600000
+local GIT_ENV = { GIT_TERMINAL_PROMPT = '0', GCM_INTERACTIVE = 'never' }
+local SLOW = { '-c', 'http.lowSpeedLimit=1000', '-c', 'http.lowSpeedTime=60' }
+
+-- `git [-C dir] <args>` for a command that talks to a remote, with what it needs not to hang.
+local function remote_git(args, dir)
+    local cmd = { 'git' }
+    if dir then vim.list_extend(cmd, { '-C', dir }) end
+    vim.list_extend(cmd, SLOW)
+    return vim.list_extend(cmd, args)
+end
+
+local function remote_opts() return { env = GIT_ENV, timeout = M.git_timeout } end
+
 local function last_line(data)
     local last
     for line in data:gmatch('[^\r\n]+') do
@@ -40,6 +58,8 @@ local function run_cmd(cmd, opts, report, cb)
     local spawned, err = pcall(vim.system, cmd, spawn_opts, function(res)
         if res.code == 0 then
             cb(true)
+        elseif res.code == 124 and spawn_opts.timeout then
+            cb(false, cmd[1] .. ' timed out')
         else
             cb(false, tail or string.format('%s exited with code %d', cmd[1], res.code))
         end
@@ -55,21 +75,29 @@ local function source_plugin_files(dir)
     end
 end
 
+-- Makes the help of the plugin in `dir` findable with :help, which needs a doc/tags next to its help files. A
+-- doc/tags that is already there is left alone unless `force`, so one the plugin commits is never overwritten.
+local function make_helptags(dir, force)
+    local doc = dir .. '/doc'
+    if not uv.fs_stat(doc) or (not force and uv.fs_stat(doc .. '/tags')) then return end
+    pcall(vim.cmd, 'helptags ' .. vim.fn.fnameescape(doc))
+end
+
 -- Runs `git -C dir <args>` and calls `cb(ok, text)` on the main loop: its output, or when it failed the last
--- line it printed.
-local function git(dir, args, cb)
-    local spawned = pcall(
-        vim.system,
-        vim.list_extend({ 'git', '-C', dir }, args),
-        { text = true },
-        function(res)
-            vim.schedule(function()
-                if res.code == 0 then return cb(true, vim.trim(res.stdout or '')) end
-                local said = last_line(res.stderr or '') or last_line(res.stdout or '')
-                cb(false, said or string.format('git exited with code %d', res.code))
-            end)
-        end
-    )
+-- line it printed. `network` is for a command that talks to a remote.
+local function git(dir, args, cb, network)
+    local cmd = { 'git', '-C', dir }
+    if network then vim.list_extend(cmd, SLOW) end
+    vim.list_extend(cmd, args)
+    local opts = vim.tbl_extend('force', { text = true }, network and remote_opts() or {})
+    local spawned = pcall(vim.system, cmd, opts, function(res)
+        vim.schedule(function()
+            if res.code == 0 then return cb(true, vim.trim(res.stdout or '')) end
+            if network and res.code == 124 then return cb(false, 'git timed out') end
+            local said = last_line(res.stderr or '') or last_line(res.stdout or '')
+            cb(false, said or string.format('git exited with code %d', res.code))
+        end)
+    end)
     if not spawned then vim.schedule(function() cb(false, 'git is not available') end) end
 end
 
@@ -84,21 +112,21 @@ local function pin(dir, commit, cb)
         git(dir, { 'fetch', '--depth', '1', 'origin', commit }, function(fetched, err)
             if not fetched then return cb(false, err) end
             reset()
-        end)
+        end, true)
     end)
 end
 
 function M.git_clone(job, done, report)
     local spec = job.spec
     if not spec.repo then return done(false, 'no repo') end
-    local dest = spec.dest or paths.install(job.plugin)
+    local dest = paths.install(job.plugin)
     if uv.fs_stat(dest) then return done(true, 'already installed') end
     job.working = true
     report()
     local staging = paths.staging(job.plugin)
     vim.fn.mkdir(vim.fn.fnamemodify(staging, ':h'), 'p')
     vim.fn.mkdir(vim.fn.fnamemodify(dest, ':h'), 'p')
-    local cmd = { 'git', 'clone', '--depth', '1', '--progress', clone_url(spec.repo), staging }
+    local cmd = remote_git({ 'clone', '--depth', '1', '--progress', clone_url(spec.repo), staging })
     local function fail(err)
         vim.fn.delete(staging, 'rf')
         done(false, err)
@@ -106,10 +134,11 @@ function M.git_clone(job, done, report)
     local function move()
         local moved, move_err = uv.fs_rename(staging, dest)
         if not moved then return fail('atomic move failed: ' .. tostring(move_err)) end
+        make_helptags(dest)
         lock.mark(job.plugin, dest)
         done(true)
     end
-    run_cmd(cmd, nil, report, function(ok, err)
+    run_cmd(cmd, remote_opts(), report, function(ok, err)
         vim.schedule(function()
             if not ok then return fail(err) end
             -- The lock file names the commit this plugin was last installed or updated at.
@@ -134,13 +163,13 @@ end
 -- (`spec.apply`) moves there. Its note says what happened. A plugin with changes of its own is left as it is.
 function M.git_update(job, done, report)
     local spec = job.spec
-    local dir = spec.dest or paths.install(job.plugin)
+    local dir = paths.install(job.plugin)
     if not uv.fs_stat(dir) then return done(true, 'not installed') end
     job.working = true
     report()
     run_cmd(
-        { 'git', '-C', dir, 'fetch', '--depth', '1', '--progress', 'origin' },
-        nil,
+        remote_git({ 'fetch', '--depth', '1', '--progress', 'origin' }, dir),
+        remote_opts(),
         report,
         function(fetched, err)
             vim.schedule(function()
@@ -156,7 +185,11 @@ function M.git_update(job, done, report)
                         if changes ~= '' then return done(true, 'skipped: local changes') end
                         git(dir, { 'reset', '--hard', '@{u}' }, function(moved, why)
                             if not moved then return done(false, why) end
-                            done(true, change)
+                            -- Help the update brought is findable too, unless the plugin commits its own tags.
+                            git(dir, { 'ls-files', 'doc/tags' }, function(_, tracked)
+                                if tracked == '' then make_helptags(dir, true) end
+                                done(true, change)
+                            end)
                         end)
                     end)
                 end)
@@ -175,6 +208,20 @@ function M.shell(job, done, report)
     local cwd = job.spec.cwd or paths.install(job.plugin)
     local shell = vim.fn.has('win32') == 1 and { 'cmd.exe', '/c' } or { 'sh', '-c' }
     run_cmd(vim.list_extend(shell, { job.spec.cmd }), { cwd = cwd }, report, done)
+end
+
+-- ftdetect scripts only run when filetype detection is set up, at startup. A plugin that loads later has to run
+-- them itself, in the group they belong to.
+local function source_ftdetect(dir)
+    vim.cmd('augroup filetypedetect')
+    pcall(function()
+        for _, ext in ipairs({ 'vim', 'lua' }) do
+            for _, file in ipairs(vim.fn.globpath(dir, 'ftdetect/*.' .. ext, false, true)) do
+                vim.cmd.source(vim.fn.fnameescape(file))
+            end
+        end
+    end)
+    vim.cmd('augroup END')
 end
 
 local sourced = {} -- plugin directory -> true once its plugin/ files were sourced, or Neovim will source them
@@ -196,10 +243,12 @@ local function add_to_rtp(name, source)
         end
         -- Before VimEnter, Neovim's own startup pass sources plugin/ and after/plugin from the rtp.
         sourced[path] = vim.v.vim_did_enter == 0 or nil
+        make_helptags(path)
     end
     if source ~= false and vim.v.vim_did_enter == 1 and not sourced[path] then
         sourced[path] = true
         for _, dir in ipairs(dirs) do
+            source_ftdetect(dir)
             source_plugin_files(dir)
         end
     end

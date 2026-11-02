@@ -220,4 +220,81 @@ test('attaches generated tasks to each spec', function()
     h.eq(h.ids(resolved[1].spec.tasks), { 'install', 'rtp' })
 end)
 
+test('a plugin with enabled = false is left out', function()
+    local resolved = resolver.resolve({
+        { name = 'on', repo = 'x/on' },
+        { name = 'off', repo = 'x/off', enabled = false },
+    })
+    h.eq(h.names(resolved), { 'on' })
+    h.eq(h.notes, {})
+end)
+
+test(
+    'cond and enabled can be false or a function, which gets the spec and keeps the plugin on when it says yes',
+    function()
+        local resolved = resolver.resolve({
+            { name = 'a', repo = 'x/a', cond = false },
+            { name = 'b', repo = 'x/b', cond = function() return false end },
+            { name = 'c', repo = 'x/c', cond = function(spec) return spec.name == 'c' end },
+            { name = 'd', repo = 'x/d', enabled = function() return nil end },
+            { name = 'e', repo = 'x/e', cond = true, enabled = true },
+        })
+        h.eq(h.names(resolved), { 'c', 'e' })
+    end
+)
+
+test('a cond that raises keeps the plugin on and says so', function()
+    local resolved =
+        resolver.resolve({ { name = 'boom', repo = 'x/boom', cond = function() error('no') end } })
+    h.eq(h.names(resolved), { 'boom' })
+    h.ok(h.notified('`cond` of boom failed'), vim.inspect(h.notes))
+end)
+
+test(
+    'a switched off plugin is dropped from the dependencies of the others, by name, by repo and inline',
+    function()
+        local resolved = resolver.resolve({
+            {
+                name = 'app',
+                repo = 'x/app',
+                deps = { 'lib', 'x/helper', { 'x/inline', enabled = false }, 'tool' },
+            },
+            { name = 'lib', repo = 'x/lib', enabled = false },
+            { name = 'helper', repo = 'x/helper', enabled = false },
+            { name = 'tool', repo = 'x/tool' },
+        })
+        h.eq(h.names(resolved), { 'tool', 'app' })
+        h.eq(resolved[2].spec.deps, { 'tool' })
+        h.eq(h.notes, {})
+    end
+)
+
+test('event = VeryLazy is lazy.nvim for after startup, so the plugin is later and has no trigger', function()
+    local resolved = resolver.resolve({
+        { name = 'one', repo = 'x/one', event = 'VeryLazy' },
+        {
+            name = 'two',
+            repo = 'x/two',
+            event = { 'VeryLazy', 'BufRead' },
+            keys = { { '<leader>x', ':X<cr>' } },
+        },
+        { name = 'three', repo = 'x/three', event = 'BufRead' },
+    })
+    h.eq(vim.tbl_map(function(entry) return entry.timing end, resolved), { 'later', 'later', 'trigger' })
+    h.eq({ resolved[1].spec.triggers, resolved[2].spec.triggers }, {})
+end)
+
+test(
+    'dir puts a plugin in a directory of its own, with ~ expanded, until the next resolve drops it',
+    function()
+        local paths = require('sarcina.paths')
+        local default = paths.plugins_dir() .. 'mine.nvim'
+        local resolved = resolver.resolve({ { name = 'mine.nvim', dir = '~/code/mine' } })
+        h.eq(paths.install('mine.nvim'), vim.fs.normalize('~/code/mine'))
+        h.eq(h.ids(resolved[1].spec.tasks), { 'rtp' })
+        resolver.resolve({ { name = 'mine.nvim', repo = 'x/mine' } })
+        h.eq(paths.install('mine.nvim'), default)
+    end
+)
+
 return tests

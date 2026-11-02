@@ -6,6 +6,7 @@ local M = {}
 
 local ui = require('sarcina.ui')
 local manifest_loader = require('sarcina.manifest')
+local paths = require('sarcina.paths')
 
 -- Helper: depth‑first search for topological sort.
 local function dfs(name, graph, visited, stack, sorted, path)
@@ -52,6 +53,28 @@ local function name_of(plug)
     return inferred
 end
 
+-- `enabled = false`, or a false `cond`, switches a plugin off, and so does a function of either that says no.
+-- The function gets the spec. One that raises leaves the plugin on, with a warning.
+local function switched_off(plug)
+    for _, field in ipairs({ 'enabled', 'cond' }) do
+        local value = plug[field]
+        if type(value) == 'function' then
+            local ok, result = pcall(value, plug)
+            if not ok then
+                ui.emit(
+                    'warning',
+                    string.format('`%s` of %s failed, so it stays on: %s', field, plug.name, tostring(result))
+                )
+            elseif not result then
+                return true
+            end
+        elseif value == false then
+            return true
+        end
+    end
+    return false
+end
+
 -- Earlier is stronger: `now` before `later` before a trigger.
 local RANK = { now = 1, later = 2, trigger = 3 }
 
@@ -91,12 +114,19 @@ function M.resolve(manifest)
     local repo_to_name = {}
     local graph = {}
     local names = {}
+    local disabled = {} -- the names of the plugins that are switched off
 
     -- Returns the plugin's name and whether it was new, or nil when it has no usable name.
     local function register(plug)
         local name = name_of(plug)
         if not name then return nil end
-        if name_to_spec[name] then return name, false end
+        if name_to_spec[name] or disabled[name] then return name, false end
+        if switched_off(plug) then
+            disabled[name] = true
+            if type(plug.repo) == 'string' then repo_to_name[plug.repo] = repo_to_name[plug.repo] or name end
+            ui.emit('debug', 'Plugin ' .. name .. ' is switched off')
+            return name, false
+        end
         name_to_spec[name] = plug
         graph[name] = {}
         table.insert(names, name)
@@ -116,7 +146,7 @@ function M.resolve(manifest)
     for _, plug in ipairs(manifest) do
         local name, added = register(plug)
         if not name then return {} end
-        if not added then
+        if not added and not disabled[name] then
             ui.emit('warning', 'Duplicate plugin name: ' .. name .. ' – keeping first occurrence')
         end
     end
@@ -146,7 +176,7 @@ function M.resolve(manifest)
                         )
                         return {}
                     end
-                    table.insert(dep_names, name)
+                    if not disabled[name] then table.insert(dep_names, name) end
                 end
                 plug.deps, plug.dependencies = dep_names, nil
                 graph[plug.name] = dep_names
@@ -171,6 +201,13 @@ function M.resolve(manifest)
     local ordered = {}
     for _, name in ipairs(sorted_names) do
         table.insert(ordered, { name = name, spec = name_to_spec[name] })
+    end
+    -- A plugin with a `dir` lives there, not in the plugins directory.
+    paths.reset_dirs()
+    for _, entry in ipairs(ordered) do
+        if type(entry.spec.dir) == 'string' then
+            paths.set_dir(entry.name, vim.fs.normalize(entry.spec.dir))
+        end
     end
     ui.emit('debug', string.format('Resolved %d plugins (order respects dependencies)', #ordered))
 

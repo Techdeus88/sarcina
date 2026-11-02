@@ -18,7 +18,7 @@ end
 local RTP_TASK = "{ id = 'rtp', type = 'rtp' }"
 
 -- Runs one task of the plugin in a child Neovim, before startup finishes or after it, and reports the globals.
-local function run_child(name, task, before_startup)
+local function run_child(name, task, before_startup, probe)
     local script = vim.fn.tempname() .. '.lua'
     vim.fn.writefile({
         string.format('vim.opt.rtp:prepend(%q)', root),
@@ -28,7 +28,8 @@ local function run_child(name, task, before_startup)
         before_startup and 'tasks.wait(5000)' or '',
         "vim.api.nvim_create_autocmd('VimEnter', { callback = function()",
         '    tasks.wait(5000)',
-        '    io.stdout:write(vim.json.encode({ main = vim.g.main_ran, after = vim.g.after_ran, built = vim.g.built, count = vim.g.main_count }))',
+        probe and ('    _G.probe_value = (function() ' .. probe .. ' end)()') or '',
+        '    io.stdout:write(vim.json.encode({ main = vim.g.main_ran, after = vim.g.after_ran, built = vim.g.built, count = vim.g.main_count, probe = _G.probe_value }))',
         '    vim.cmd.qa()',
         'end })',
     }, script)
@@ -123,5 +124,50 @@ test('the after dir goes behind the plugin on the runtimepath', function()
     vim.opt.rtp:remove(dir)
     vim.opt.rtp:remove(dir .. '/after')
 end)
+
+test(
+    'the rtp task makes the help of a plugin findable, and leaves the doc/tags a plugin ships alone',
+    function()
+        local dir = paths.install('docs.nvim')
+        vim.fn.mkdir(dir .. '/doc', 'p')
+        vim.fn.writefile({ '*docs.txt*  A plugin', '', 'About *docs-topic* here.' }, dir .. '/doc/docs.txt')
+        h.eq(h.run({ { name = 'docs.nvim', tasks = { { id = 'rtp', type = 'rtp' } } } }).failed, 0)
+        h.ok(vim.uv.fs_stat(dir .. '/doc/tags'), 'no doc/tags was made')
+        h.ok(pcall(vim.cmd, 'help docs-topic'), 'the help of the plugin is not found')
+        vim.cmd('helpclose')
+        vim.opt.rtp:remove(dir)
+        local kept = paths.install('kept.nvim')
+        vim.fn.mkdir(kept .. '/doc', 'p')
+        vim.fn.writefile({ '*kept.txt*  A plugin', '', 'About *kept-topic* here.' }, kept .. '/doc/kept.txt')
+        vim.fn.writefile({ 'kept-topic\tkept.txt\t/*kept-topic*' }, kept .. '/doc/tags')
+        h.run({ { name = 'kept.nvim', tasks = { { id = 'rtp', type = 'rtp' } } } })
+        h.eq(vim.fn.readfile(kept .. '/doc/tags'), { 'kept-topic\tkept.txt\t/*kept-topic*' })
+        vim.opt.rtp:remove(kept)
+    end
+)
+
+-- A plugin whose ftdetect scripts, one in Lua and one in Vim script, each detect an extension of their own.
+local function ftdetect_plugin(name)
+    local dir = paths.install(name)
+    vim.fn.mkdir(dir .. '/ftdetect', 'p')
+    vim.fn.writefile(
+        { "vim.filetype.add({ extension = { zzlua = 'zzlua' } })" },
+        dir .. '/ftdetect/zzlua.lua'
+    )
+    vim.fn.writefile({ 'autocmd BufRead,BufNewFile *.zzvim setfiletype zzvim' }, dir .. '/ftdetect/zzvim.vim')
+end
+
+local DETECT = "local function ft(ext) local f = vim.fn.tempname() .. '.' .. ext; vim.fn.writefile({ 'x' }, f); "
+    .. "vim.cmd('edit ' .. f); return vim.bo.filetype end return ft('zzlua') .. ',' .. ft('zzvim')"
+
+test(
+    'a plugin loaded after startup has its ftdetect scripts applied, and one loaded before it still does',
+    function()
+        ftdetect_plugin('late-ft.nvim')
+        h.eq(run_child('late-ft.nvim', RTP_TASK, false, DETECT).probe, 'zzlua,zzvim')
+        ftdetect_plugin('early-ft.nvim')
+        h.eq(run_child('early-ft.nvim', RTP_TASK, true, DETECT).probe, 'zzlua,zzvim')
+    end
+)
 
 return tests

@@ -6,7 +6,16 @@ local M = {}
 -- Outside every 'packpath' entry, so Neovim never loads these on its own.
 function M.plugins_dir() return vim.fn.stdpath('data') .. '/sarcina/plugins/' end
 
-function M.install(name) return M.plugins_dir() .. name end
+local dirs = {} -- plugin name -> the directory of a plugin that lives outside the plugins directory
+
+--- The directory of a plugin: where its spec's `dir` says, or its place in the plugins directory.
+function M.install(name) return dirs[name] or (M.plugins_dir() .. name) end
+
+--- A plugin that lives in `dir`, such as one you are working on. The resolver sets it from the spec's `dir`.
+function M.set_dir(name, dir) dirs[name] = dir end
+
+--- Forget every `dir`, before the resolver reads the specs again.
+function M.reset_dirs() dirs = {} end
 
 -- The commit of every installed plugin, kept with your config so it can be committed. See lock.lua.
 function M.lock_file() return vim.fn.stdpath('config') .. '/sarcina-lock.json' end
