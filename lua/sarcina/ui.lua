@@ -1,8 +1,9 @@
 -- sarcina/ui.lua
 -- Event bus and the floating window for Sarcina.
--- The window is a pure view of the stats (see window.lua): a list of plugins and, when there is room, a
--- pane with the details of the selected one. This module decides when it opens and which plugins to
--- redraw, owns the two windows, and keeps no task state of its own.
+-- The window is a pure view of the stats (see window.lua): a header, a list of plugins and, when there is
+-- room, a pane with the details of the selected one, and a footer. The list and the details scroll; the
+-- header and the footer have windows of their own so they stay in view. This module decides when it opens
+-- and which plugins to redraw, owns the four windows, and keeps no task state of its own.
 -- Events: "info" | "warn" | "warning" | "error" (strings, shown as toasts), "debug" (string, listeners only),
 -- "task" (job), "start", "done" (summary).
 
@@ -17,6 +18,10 @@ M._bufnr = nil -- the list
 M._winid = nil
 M._detail_bufnr = nil
 M._detail_winid = nil
+M._header_bufnr = nil
+M._header_winid = nil
+M._footer_bufnr = nil
+M._footer_winid = nil
 M._dismissed = false
 M._pinned = false -- opened by hand, so a clean run does not close it
 M._seen_failed = 0
@@ -42,7 +47,29 @@ local function buf_valid() return M._bufnr ~= nil and vim.api.nvim_buf_is_valid(
 
 local function win_valid() return M._winid ~= nil and vim.api.nvim_win_is_valid(M._winid) end
 
-local function detail_valid() return M._detail_winid ~= nil and vim.api.nvim_win_is_valid(M._detail_winid) end
+-- The windows besides the list are `header`, `detail` and `footer`, each with its buffer and window in
+-- `ui._<name>_bufnr` and `ui._<name>_winid`.
+local PANES = { 'header', 'detail', 'footer' }
+local shown -- the plugin the details window showed last
+
+local function pane_win(name) return M['_' .. name .. '_winid'] end
+
+local function pane_buf(name) return M['_' .. name .. '_bufnr'] end
+
+local function pane_valid(name)
+    local win = pane_win(name)
+    return win ~= nil and vim.api.nvim_win_is_valid(win)
+end
+
+local function new_buffer()
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = 'wipe'
+    vim.bo[buf].filetype = 'sarcina'
+    return buf
+end
+
+-- The three buffers window.lua draws into.
+local function buffers() return { list = M._bufnr, header = M._header_bufnr, footer = M._footer_bufnr } end
 
 --- Read the `ui` options of setup().
 function M.configure(opts)
@@ -54,11 +81,17 @@ function M.configure(opts)
     M.show = show
 end
 
--- Draws the details of the selected plugin and names the details window after it.
+-- Draws the details of the selected plugin and names the details window after it. A different plugin
+-- starts at the top of the window.
 local function show_details()
-    if not detail_valid() then return end
-    local name = window().draw_details(M._detail_bufnr)
-    vim.api.nvim_win_set_config(M._detail_winid, { title = ' ' .. (name or '') .. ' ', title_pos = 'left' })
+    if not pane_valid('detail') then return end
+    local win = pane_win('detail')
+    local name = window().draw_details(pane_buf('detail'))
+    vim.api.nvim_win_set_config(win, { title = ' ' .. (name or '') .. ' ', title_pos = 'left' })
+    if name ~= shown then
+        shown = name
+        vim.api.nvim_win_call(win, function() vim.fn.winrestview({ topline = 1, lnum = 1, leftcol = 0 }) end)
+    end
 end
 
 -- Puts the cursor on the plugin at work. A user who is in the window keeps their plugin: after the rows
@@ -78,48 +111,76 @@ local function follow(opened, dirty)
     if opened or dirty == true or now ~= before or (dirty and dirty[now]) then show_details() end
 end
 
-local function close_details()
-    if detail_valid() then pcall(vim.api.nvim_win_close, M._detail_winid, true) end
-    if M._detail_bufnr and vim.api.nvim_buf_is_valid(M._detail_bufnr) then
-        pcall(vim.api.nvim_buf_delete, M._detail_bufnr, { force = true })
-    end
-    M._detail_bufnr, M._detail_winid = nil, nil
+local function close_pane(name)
+    if pane_valid(name) then pcall(vim.api.nvim_win_close, pane_win(name), true) end
+    local buf = pane_buf(name)
+    if buf and vim.api.nvim_buf_is_valid(buf) then pcall(vim.api.nvim_buf_delete, buf, { force = true }) end
+    M['_' .. name .. '_bufnr'], M['_' .. name .. '_winid'] = nil, nil
 end
 
-local function open_details(config)
-    M._detail_bufnr = vim.api.nvim_create_buf(false, true)
-    vim.bo[M._detail_bufnr].bufhidden = 'wipe'
-    vim.bo[M._detail_bufnr].filetype = 'sarcina'
-    local opts = vim.tbl_extend('force', config, {
-        style = 'minimal',
-        border = 'rounded',
-        focusable = false,
-        noautocmd = true,
-    })
-    M._detail_winid = vim.api.nvim_open_win(M._detail_bufnr, false, opts)
-    local wo = vim.wo[M._detail_winid]
+local function close_panes()
+    for _, name in ipairs(PANES) do
+        close_pane(name)
+    end
+    shown = nil
+end
+
+-- Opens a window that cannot take focus, in the buffer it already has or a new one.
+local function open_pane(name, config, extra)
+    local buf = pane_buf(name) or new_buffer()
+    local opts = vim.tbl_extend(
+        'force',
+        config,
+        { style = 'minimal', border = 'rounded', focusable = false, noautocmd = true },
+        extra or {}
+    )
+    M['_' .. name .. '_bufnr'] = buf
+    M['_' .. name .. '_winid'] = vim.api.nvim_open_win(buf, false, opts)
+    return pane_win(name)
+end
+
+local function open_detail(config)
+    local wo = vim.wo[open_pane('detail', config)]
     wo.wrap, wo.linebreak, wo.breakindent, wo.breakindentopt = true, true, true, 'shift:10'
 end
 
--- Puts both windows where the last full draw says: the details one comes and goes with the room for it.
+-- Puts the windows where the last full draw says: the details one comes and goes with the room for it.
 local function apply_config()
     local config = window().config()
     vim.api.nvim_win_set_config(M._winid, config.list)
-    if not config.detail then return close_details() end
-    if detail_valid() then
-        vim.api.nvim_win_set_config(M._detail_winid, config.detail)
-    else
-        open_details(config.detail)
+    for _, name in ipairs({ 'header', 'footer' }) do
+        if pane_valid(name) then vim.api.nvim_win_set_config(pane_win(name), config[name]) end
     end
+    if not config.detail then return close_pane('detail') end
+    if pane_valid('detail') then
+        vim.api.nvim_win_set_config(pane_win('detail'), config.detail)
+    else
+        open_detail(config.detail)
+    end
+end
+
+-- Scrolls the details by a page of the keys Neovim scrolls with, without leaving the list.
+local function scroll_details(key)
+    if not pane_valid('detail') then return end
+    vim.api.nvim_win_call(
+        pane_win('detail'),
+        function() vim.cmd.normal({ vim.keycode(key), bang = true }) end
+    )
 end
 
 local function ensure_buffer()
     if buf_valid() then return end
     window().define_highlights()
-    M._bufnr = vim.api.nvim_create_buf(false, true)
-    vim.bo[M._bufnr].bufhidden = 'wipe'
-    vim.bo[M._bufnr].filetype = 'sarcina'
+    M._bufnr = new_buffer()
     vim.keymap.set('n', 'q', M.dismiss, { buffer = M._bufnr, nowait = true, desc = 'Close Sarcina window' })
+    for _, key in ipairs({ '<C-d>', '<C-u>' }) do
+        vim.keymap.set(
+            'n',
+            key,
+            function() scroll_details(key) end,
+            { buffer = M._bufnr, desc = 'Scroll the Sarcina details' }
+        )
+    end
     vim.api.nvim_create_autocmd('CursorMoved', {
         buffer = M._bufnr,
         callback = function()
@@ -132,19 +193,19 @@ end
 
 local function open_window(enter)
     ensure_buffer()
-    window().draw(M._bufnr)
+    M._header_bufnr, M._footer_bufnr = new_buffer(), new_buffer()
+    window().draw(buffers())
     local config = window().config()
-    local opts = vim.tbl_extend('force', config.list, {
-        style = 'minimal',
-        border = 'rounded',
-        footer = ' q close ',
-        footer_pos = 'right',
-        noautocmd = true,
-    })
-    M._winid = vim.api.nvim_open_win(M._bufnr, enter, opts)
+    M._winid = vim.api.nvim_open_win(
+        M._bufnr,
+        enter,
+        vim.tbl_extend('force', config.list, { style = 'minimal', border = 'rounded', noautocmd = true })
+    )
     vim.wo[M._winid].wrap = false
     vim.wo[M._winid].cursorline = true
-    if config.detail then open_details(config.detail) end
+    open_pane('header', config.header)
+    open_pane('footer', config.footer, { footer = ' q close · ^d ^u scroll details ', footer_pos = 'right' })
+    if config.detail then open_detail(config.detail) end
     vim.api.nvim_create_autocmd('WinClosed', {
         pattern = tostring(M._winid),
         once = true,
@@ -155,7 +216,7 @@ local function open_window(enter)
             end
             M._winid = nil
             M._pinned = false
-            close_details()
+            close_panes()
             window().closed()
         end,
     })
@@ -181,9 +242,9 @@ function M._flush()
     end
     local redrawn = full
     if full then
-        window().draw(M._bufnr)
+        window().draw(buffers())
     else
-        redrawn = window().refresh(M._bufnr, dirty)
+        redrawn = window().refresh(buffers(), dirty)
     end
     if redrawn then apply_config() end
     M._seen_failed = failed
@@ -259,7 +320,7 @@ function M.open()
     M._dismissed = false
     M._pinned = true
     if win_valid() then
-        window().draw(M._bufnr)
+        window().draw(buffers())
         apply_config()
         vim.api.nvim_set_current_win(M._winid)
         follow(true)
@@ -272,7 +333,7 @@ function M.close()
     M._closing = true
     if win_valid() then pcall(vim.api.nvim_win_close, M._winid, true) end
     if buf_valid() then pcall(vim.api.nvim_buf_delete, M._bufnr, { force = true }) end
-    close_details()
+    close_panes()
     window().closed()
     M._closing = false
     M._bufnr, M._winid = nil, nil

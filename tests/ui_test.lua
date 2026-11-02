@@ -49,6 +49,8 @@ local function win_open() return ui._winid ~= nil and vim.api.nvim_win_is_valid(
 
 local function lines() return vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false) end
 
+local function header() return vim.api.nvim_buf_get_lines(ui._header_bufnr, 0, -1, false)[1] end
+
 local function loaded(name) return { name = name, tasks = { h.lua('rtp', h.noop) } } end
 
 local function failing(name)
@@ -113,7 +115,7 @@ end)
 test('the cursor sits on the plugin at work, else on the last failed one', function()
     run({ failing('a'), loaded('b'), failing('c') })
     ui.open()
-    h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 4)
+    h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 3)
 end)
 
 test('a clean appended run does not auto-close a window that still shows a failure', function()
@@ -134,7 +136,12 @@ test('a dismissed window ignores a clean appended run but reopens for a new fail
     h.eq(win_open(), false)
     append_run({ failing('c') })
     h.ok(vim.wait(300, win_open), 'a new failure did not reopen the window')
-    h.ok(lines()[1]:find('2 failed', 1, true), lines()[1])
+    h.eq(header(), ' Total: 3 plugins')
+    local failed = 0
+    for _, line in ipairs(lines()) do
+        if line:find('✘', 1, true) then failed = failed + 1 end
+    end
+    h.eq(failed, 2)
 end)
 
 test('a normal run toasts one summary line', function()

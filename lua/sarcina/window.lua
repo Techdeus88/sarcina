@@ -27,7 +27,7 @@ local HL = {
     installing = 'SarcinaRunning',
     building = 'SarcinaRunning',
     loading = 'SarcinaRunning',
-    waiting = 'SarcinaPending',
+    waiting = 'SarcinaWaiting',
     loaded = 'SarcinaDone',
     blocked = 'SarcinaSkipped',
     failed = 'SarcinaFailed',
@@ -43,6 +43,7 @@ local STEP_HL = {
 local ACTIVE = { installing = true, building = true, loading = true }
 local HL_LINKS = {
     SarcinaPending = 'Comment',
+    SarcinaWaiting = 'DiagnosticWarn',
     SarcinaRunning = 'DiagnosticInfo',
     SarcinaDone = 'DiagnosticOk',
     SarcinaFailed = 'DiagnosticError',
@@ -54,10 +55,11 @@ local HL_LINKS = {
     SarcinaFooter = 'Comment',
 }
 
-local NAME_MAX, NAME_MIN, TAG_W, STATE_W, TIME_W, SLOWEST = 28, 10, 7, 10, 6, 3
+local NAME_MAX, NAME_MIN, TAG_W, STATE_W, TIME_W = 28, 10, 7, 10, 6
 local KEY_W, STEP_W = 9, 11
--- The window takes 80% of the editor each way. The list gets at most 55% of the width, and the details
--- pane only exists when both panes have this much room.
+-- The window takes 80% of the editor each way: a header across the top, a footer across the bottom, and
+-- between them the list and the details, which scroll. The list gets at most 55% of the width, and the
+-- details pane only exists when both panes have this much room.
 local SHARE, LIST_MIN, DETAIL_MIN = 0.8, 40, 36
 local LIST_SHARE = 0.55
 
@@ -70,21 +72,65 @@ local revs = {} -- plugin name -> short commit, '' when there is none, false whi
 local details_buf = nil -- the buffer the details were last drawn in
 -- Fixed at each full draw, so streaming output never resizes the window.
 local view = {
-    outer_w = 0, -- both panes with their borders
+    outer_w = 0, -- the whole window with its borders
     outer_h = 0,
-    height = 0, -- inner height of each pane
+    full_w = 0, -- inner width of the header and the footer
+    middle = 0, -- inner height of the list and the details
+    total_h = 0, -- the four windows stacked, borders included
     list_w = 0, -- inner width of the list
     detail_w = 0, -- inner width of the details, nil when there is no details pane
     name_w = 0,
     progress_w = 0,
     show_state = true,
     detail = 0, -- columns left for a row's detail text
-    footer_n = 1, -- lines of the stats summary, which wraps
 }
+
+-- The header and the footer are one line each, and two borders.
+local HEADER_OUTER, FOOTER_OUTER = 3, 3
+
+-- The tasks widget of a row is a pill: a light background in the colour of the state, with the text in a
+-- darker shade of the same colour. `from` is the group whose colour it takes, `fallback` is used when the
+-- colorscheme gives that group none.
+local PILLS = {
+    SarcinaTaskDone = { from = 'DiagnosticOk', fallback = 0x98c379 },
+    SarcinaTaskRunning = { from = 'DiagnosticInfo', fallback = 0x61afef },
+    SarcinaTaskWaiting = { from = 'DiagnosticWarn', fallback = 0xe5c07b },
+    SarcinaTaskFailed = { from = 'DiagnosticError', fallback = 0xe06c75 },
+    SarcinaTaskIdle = { from = 'Comment', fallback = 0x9099a5 },
+}
+local PILL = {
+    pending = 'SarcinaTaskIdle',
+    installing = 'SarcinaTaskRunning',
+    building = 'SarcinaTaskRunning',
+    loading = 'SarcinaTaskRunning',
+    waiting = 'SarcinaTaskWaiting',
+    loaded = 'SarcinaTaskDone',
+    blocked = 'SarcinaTaskIdle',
+    failed = 'SarcinaTaskFailed',
+}
+
+-- `color` moved `ratio` of the way to `toward`, both 0xRRGGBB.
+local function mix(color, toward, ratio)
+    local out = 0
+    for _, shift in ipairs({ 16, 8, 0 }) do
+        local from = bit.band(bit.rshift(color, shift), 0xff)
+        local to = bit.band(bit.rshift(toward, shift), 0xff)
+        out = bit.bor(out, bit.lshift(math.floor(from + (to - from) * ratio + 0.5), shift))
+    end
+    return out
+end
 
 function M.define_highlights()
     for name, link in pairs(HL_LINKS) do
         vim.api.nvim_set_hl(0, name, { link = link, default = true })
+    end
+    for name, pill in pairs(PILLS) do
+        local color = vim.api.nvim_get_hl(0, { name = pill.from, link = false }).fg or pill.fallback
+        vim.api.nvim_set_hl(
+            0,
+            name,
+            { fg = mix(color, 0x000000, 0.6), bg = mix(color, 0xffffff, 0.75), default = true }
+        )
     end
 end
 
@@ -109,6 +155,11 @@ end
 
 local function progress_text(task, tasks) return string.format('%d of %d tasks', task, tasks) end
 
+-- The text of the tasks widget: how far the plugin is, with a check when all of it is done.
+local function pill_text(task, tasks, complete)
+    return ' ' .. progress_text(task, tasks) .. (complete and ' ✔' or '') .. ' '
+end
+
 --- The one-line numbers of `stats.get()`.
 function M.summary(numbers)
     local startup = numbers.startup_ms and string.format('startup %.0f ms', numbers.startup_ms)
@@ -123,22 +174,6 @@ function M.summary(numbers)
         numbers.triggered,
         startup
     )
-end
-
--- Packs the ' · ' separated parts of a summary into lines of at most `width` columns.
-local function wrap_summary(text, width)
-    local lines, current = {}, ''
-    for _, part in ipairs(vim.split(text, ' · ', { plain = true })) do
-        local candidate = current == '' and part or (current .. ' · ' .. part)
-        if current ~= '' and width_of(candidate) > width then
-            table.insert(lines, current)
-            current = part
-        else
-            current = candidate
-        end
-    end
-    if current ~= '' then table.insert(lines, current) end
-    return lines
 end
 
 -- A line and its extmarks, `{ start_col, end_col, group }` in bytes, from `{ text, group }` parts.
@@ -169,7 +204,9 @@ local function row_line(row)
         table.insert(parts, { pad(row.state, STATE_W), group })
     end
     table.insert(parts, { ' ' })
-    table.insert(parts, { pad(progress_text(row.task, row.tasks), view.progress_w), 'SarcinaNote' })
+    local pill = pill_text(row.task, row.tasks, row.state == 'loaded')
+    table.insert(parts, { pill, PILL[row.state] })
+    table.insert(parts, { string.rep(' ', view.progress_w - width_of(pill)) })
     table.insert(parts, { ' ' })
     table.insert(parts, { string.rep(' ', TIME_W - width_of(time)) .. time, 'SarcinaNote' })
     if view.detail > 0 then
@@ -184,42 +221,20 @@ local function row_line(row)
 end
 
 local function header_line()
-    local finished, running, failed = 0, 0, 0
-    for _, name in ipairs(names) do
-        local state = rows[name].state
-        if ACTIVE[state] then running = running + 1 end
-        if state == 'failed' then failed = failed + 1 end
-        if state ~= 'pending' and not ACTIVE[state] then finished = finished + 1 end
-    end
-    local text = string.format(' Sarcina · %d of %d plugins', finished, #names)
-    if running > 0 then text = text .. string.format(' · %d running', running) end
-    if failed > 0 then text = text .. string.format(' · %d failed', failed) end
-    return build_line({ { fit(text, view.list_w), 'SarcinaHeader' } })
+    local text = string.format(' Total: %d plugin%s', #names, #names == 1 and '' or 's')
+    return build_line({ { fit(text, view.full_w), 'SarcinaHeader' } })
 end
 
--- The stats summary, wrapped to the list and padded to the lines the last full draw made room for, then
--- the slowest plugins.
+-- How many plugins load now, later and on a trigger, on the left, and the startup time on the right.
 local function footer_lines()
-    local summary = wrap_summary(M.summary(stats.get()), view.list_w - 1)
-    local lines = {}
-    for i = 1, view.footer_n do
-        local text = i == view.footer_n and table.concat(vim.list_slice(summary, i), ' · ')
-            or summary[i]
-            or ''
-        lines[i] = build_line({ { fit(text ~= '' and ' ' .. text or '', view.list_w), 'SarcinaFooter' } })
-    end
-    local slowest = {}
-    for _, name in ipairs(names) do
-        if rows[name].duration then table.insert(slowest, rows[name]) end
-    end
-    table.sort(slowest, function(a, b) return a.duration > b.duration end)
-    local parts = {}
-    for i = 1, math.min(SLOWEST, #slowest) do
-        parts[i] = slowest[i].name .. ' ' .. format_time(slowest[i].duration)
-    end
-    local slow = ' slowest: ' .. (#parts > 0 and table.concat(parts, ' · ') or '–')
-    table.insert(lines, build_line({ { fit(slow, view.list_w), 'SarcinaFooter' } }))
-    return lines
+    local numbers = stats.get()
+    local left =
+        string.format(' Now %d, Later %d, Triggered %d', numbers.now, numbers.later, numbers.triggered)
+    local right = numbers.startup_ms and string.format('Startup: %.0fms ', numbers.startup_ms)
+        or 'Startup: … '
+    local gap = view.full_w - width_of(left) - width_of(right)
+    if gap < 1 then return { build_line({ { fit(left, view.full_w), 'SarcinaFooter' } }) } end
+    return { build_line({ { left, 'SarcinaFooter' }, { string.rep(' ', gap) }, { right, 'SarcinaFooter' } }) }
 end
 
 -- Fixes the sizes and the columns from the rows and the editor: the window is 80% by 80% of the editor. With
@@ -229,7 +244,7 @@ local function measure(list)
     local name_w, progress_w = 0, 0
     for _, row in ipairs(list) do
         name_w = math.max(name_w, width_of(row.name))
-        progress_w = math.max(progress_w, width_of(progress_text(row.tasks, row.tasks)))
+        progress_w = math.max(progress_w, width_of(pill_text(row.tasks, row.tasks, true)))
     end
     name_w = math.min(name_w, NAME_MAX)
     local with_state = 3 + name_w + 1 + TAG_W + 1 + STATE_W + 1 + progress_w + 1 + TIME_W + 1
@@ -238,7 +253,7 @@ local function measure(list)
     local lines = vim.o.lines - vim.o.cmdheight
     view.outer_w = math.max(math.floor(vim.o.columns * SHARE), 20)
     view.outer_h = math.max(math.floor(lines * SHARE), 5)
-    view.height = view.outer_h - 2
+    view.full_w = view.outer_w - 2
 
     local inner = view.outer_w - 4
     local list_w = math.min(with_state, math.floor(inner * LIST_SHARE))
@@ -257,17 +272,10 @@ local function measure(list)
     -- Less than a few characters of detail says nothing, so the column goes.
     view.detail = view.list_w - used >= 4 and view.list_w - used or 0
 
-    local n = #list
-    local widest = M.summary({
-        count = n,
-        loaded = n,
-        not_loaded = n,
-        now = n,
-        later = n,
-        triggered = n,
-        startup_ms = 99999,
-    })
-    view.footer_n = #wrap_summary(widest, view.list_w - 1)
+    -- The header and the footer take what they need, and the list and the details the rest.
+    local chrome = HEADER_OUTER + FOOTER_OUTER
+    view.middle = math.max(view.outer_h - chrome - 2, 3)
+    view.total_h = chrome + view.middle + 2
 end
 
 -- Replaces `count` lines from line `first` (1-based) with `lines` and colours them.
@@ -295,79 +303,87 @@ local function put(buf, ns, first, count, lines)
     end
 end
 
-local function put_ends(buf)
-    put(buf, NS, 1, 1, { header_line() })
-    put(buf, NS, #names + 2, view.footer_n + 1, footer_lines())
+-- The header and the footer have buffers of their own, so they stay in view while the list scrolls.
+local function put_chrome(bufs)
+    put(bufs.header, NS, 1, vim.api.nvim_buf_line_count(bufs.header), { header_line() })
+    put(bufs.footer, NS, 1, vim.api.nvim_buf_line_count(bufs.footer), footer_lines())
 end
 
---- Draws every line of the list from the stats: one row per registered plugin, in the order they loaded.
---- Fixes the sizes. `list` is `stats.plugins()` when the caller already has it.
-function M.draw(buf, list)
+--- Draws every row of the list from the stats, one per registered plugin in the order they loaded, and the
+--- header and the footer. `bufs` is `{ list, header, footer }`, the three buffers. Fixes the sizes. `list`
+--- is `stats.plugins()` when the caller already has it.
+function M.draw(bufs, list)
     list = list or stats.plugins()
     entries, line_of, rows, names = {}, {}, {}, {}
     measure(list)
-    local lines = { build_line({}) }
-    for _, row in ipairs(list) do
-        table.insert(names, row.name)
+    local lines = {}
+    for i, row in ipairs(list) do
+        names[i] = row.name
         rows[row.name] = row
-        line_of[row.name] = #lines + 1
-        entries[#lines + 1] = { kind = 'plugin', name = row.name }
-        table.insert(lines, row_line(row))
+        line_of[row.name] = i
+        entries[i] = { kind = 'plugin', name = row.name }
+        lines[i] = row_line(row)
     end
-    for _ = 1, view.footer_n + 1 do
-        table.insert(lines, build_line({}))
-    end
-    vim.api.nvim_buf_clear_namespace(buf, NS, 0, -1)
-    put(buf, NS, 1, vim.api.nvim_buf_line_count(buf), lines)
-    put_ends(buf)
+    vim.api.nvim_buf_clear_namespace(bufs.list, NS, 0, -1)
+    put(bufs.list, NS, 1, vim.api.nvim_buf_line_count(bufs.list), #lines > 0 and lines or { build_line({}) })
+    put_chrome(bufs)
     if not (selected and line_of[selected]) then selected = names[1] end
 end
 
 --- Redraws the rows of the plugins in `dirty` (a set of names), the header and the footer. Draws everything
 --- instead when the order of the plugins changed, because one loaded or one was never drawn. Returns true
 --- when it drew everything.
-function M.refresh(buf, dirty)
+function M.refresh(bufs, dirty)
     local list = stats.plugins()
     local same = #list == #names
     for i, row in ipairs(list) do
         same = same and names[i] == row.name
     end
     if not same then
-        M.draw(buf, list)
+        M.draw(bufs, list)
         return true
     end
     for _, row in ipairs(list) do
         if dirty[row.name] then
             rows[row.name] = row
-            put(buf, NS, line_of[row.name], 1, { row_line(row) })
+            put(bufs.list, NS, line_of[row.name], 1, { row_line(row) })
         end
     end
-    put_ends(buf)
+    put_chrome(bufs)
     return false
 end
 
---- Where the windows go: both panes together are centered and 80% by 80% of the editor. `detail` is nil
---- when there is no room for the details pane.
+--- Where the windows go. All four are stacked and centered, 80% by 80% of the editor: the header, then the
+--- list and the details side by side, then the footer. `detail` is nil when there is no room for the details.
 function M.config()
     local lines = vim.o.lines - vim.o.cmdheight
-    local row = math.max(math.floor((lines - view.outer_h) / 2), 0)
+    local row = math.max(math.floor((lines - view.total_h) / 2), 0)
     local col = math.max(math.floor((vim.o.columns - view.outer_w) / 2), 0)
+    local middle_row = row + HEADER_OUTER
     local config = {
-        list = { relative = 'editor', row = row, col = col, width = view.list_w, height = view.height },
+        header = { relative = 'editor', row = row, col = col, width = view.full_w, height = 1 },
+        list = { relative = 'editor', row = middle_row, col = col, width = view.list_w, height = view.middle },
+        footer = {
+            relative = 'editor',
+            row = middle_row + view.middle + 2,
+            col = col,
+            width = view.full_w,
+            height = 1,
+        },
     }
     if view.detail_w then
         config.detail = {
             relative = 'editor',
-            row = row,
+            row = middle_row,
             col = col + view.list_w + 2,
             width = view.detail_w,
-            height = view.height,
+            height = view.middle,
         }
     end
     return config
 end
 
---- The line to keep in view: the last plugin at work, else the last failed one, else the header.
+--- The line to keep in view: the last plugin at work, else the last failed one, else the first.
 function M.target()
     local active, failed
     for _, name in ipairs(names) do
@@ -381,7 +397,7 @@ function M.target()
     return active or failed or 1
 end
 
---- What a line shows, or nil for the header and the footer.
+--- What a line of the list shows.
 function M.entry_at(lnum) return entries[lnum] end
 
 --- The line a plugin is on, or nil.
@@ -390,8 +406,7 @@ function M.line(name) return line_of[name] end
 --- The plugin the details show.
 function M.selected() return selected end
 
---- The cursor is on line `lnum`: the details show that plugin. On the header or the footer they keep the
---- plugin they had.
+--- The cursor is on line `lnum` of the list: the details show that plugin.
 function M.select(lnum)
     local entry = entries[lnum]
     if entry then selected = entry.name end
