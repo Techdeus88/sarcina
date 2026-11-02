@@ -9,7 +9,7 @@ local resolver = require('sarcina.resolver')
 local ui = require('sarcina.ui')
 
 local SUBCOMMANDS =
-    { 'add', 'remove', 'install', 'sync', 'clean', 'check', 'update', 'stats', 'panel', 'help' }
+    { 'add', 'delete', 'install', 'load', 'sync', 'clean', 'check', 'update', 'stats', 'panel', 'help' }
 
 local subcommands = {}
 
@@ -18,14 +18,19 @@ local function resolve_manifest() return resolver.resolve(require('sarcina.manif
 
 function subcommands.add(args) ui.emit('info', 'Add command not yet implemented: ' .. args) end
 
-function subcommands.remove(_, args)
-    require('sarcina.remover').run(resolve_manifest(), vim.list_slice(args.fargs, 2))
+function subcommands.delete(_, args)
+    require('sarcina.deleter').run(resolve_manifest(), vim.list_slice(args.fargs, 2))
 end
 
 -- Runs the plans of the plugins that have not loaded in this session (see installer.pending), and says which.
--- Returns false when there were none.
-local function run_pending(resolved)
-    local pending = installer.pending(resolved)
+-- `names` picks plugins (none picks all), and `only` keeps the ones that are not on disk ('install') or that
+-- are ('load'). Returns false when there were none.
+local function run_pending(resolved, names, only)
+    local pending = vim.tbl_filter(function(entry)
+        if names and #names > 0 and not vim.tbl_contains(names, entry.name) then return false end
+        local on_disk = vim.uv.fs_stat(paths.install(entry.name)) ~= nil
+        return only == nil or (only == 'load') == on_disk
+    end, installer.pending(resolved))
     if #pending == 0 then return false end
     local cloning, loading = {}, {}
     for _, entry in ipairs(pending) do
@@ -46,8 +51,19 @@ end
 
 -- Installs and loads the plugins that have not loaded in this session. One that has is left alone, so its config
 -- never runs twice.
-function subcommands.install(_)
-    if not run_pending(resolve_manifest()) then ui.emit('info', 'Every plugin is installed and loaded') end
+function subcommands.install(_, args)
+    local names = vim.list_slice(args.fargs, 2)
+    if not run_pending(resolve_manifest(), names, #names > 0 and 'install' or nil) then
+        ui.emit('info', #names > 0 and 'Nothing to install' or 'Every plugin is installed and loaded')
+    end
+end
+
+-- Loads the plugins on disk that have not loaded in this session, those in `names` or all of them. Nothing is
+-- cloned.
+function subcommands.load(_, args)
+    if not run_pending(resolve_manifest(), vim.list_slice(args.fargs, 2), 'load') then
+        ui.emit('info', 'Nothing to load')
+    end
 end
 
 -- Lists the plugin directories that are not in your specs, or with `bang` deletes them. `command` is the
@@ -141,9 +157,17 @@ end
 -- Subcommand names, and after `check` or `update` the names of the plugins.
 function M.complete(ArgLead, CmdLine)
     local candidates = SUBCOMMANDS
-    if CmdLine and (CmdLine:match('^%s*%S+%s+check%s') or CmdLine:match('^%s*%S+%s+update%s')) then
+    if
+        CmdLine
+        and (
+            CmdLine:match('^%s*%S+%s+check%s')
+            or CmdLine:match('^%s*%S+%s+update%s')
+            or CmdLine:match('^%s*%S+%s+install%s')
+            or CmdLine:match('^%s*%S+%s+load%s')
+        )
+    then
         candidates = vim.tbl_map(function(entry) return entry.name end, require('sarcina.stats').specs())
-    elseif CmdLine and CmdLine:match('^%s*%S+%s+remove%s') then
+    elseif CmdLine and CmdLine:match('^%s*%S+%s+delete%s') then
         candidates = installer.installed()
     end
     return vim.tbl_filter(function(c) return vim.startswith(c, ArgLead) end, candidates)

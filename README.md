@@ -245,11 +245,13 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | Command | Does |
 | --- | --- |
 | `:Sarcina install` | install and load the plugins that have not loaded in this session. One that has is left alone, so its `config` never runs twice |
+| `:Sarcina install <plugins>` | the same for the plugins named, cloning only those that are not on disk |
+| `:Sarcina load [plugins]` | load the plugins that are on disk but have not loaded in this session. Nothing is cloned |
 | `:Sarcina sync` | `install`, and list the directories that are not in your specs |
 | `:Sarcina sync!` | the same, and delete those directories |
 | `:Sarcina check [plugins]` | ask each plugin's remote where the plugin should be, and say which are elsewhere. Nothing is changed |
 | `:Sarcina update [plugins]` | check, ask, then move each plugin that has a newer commit to it, rebuild what moved, and write the lock file |
-| `:Sarcina remove <plugins>` | ask, then delete the named plugins from the plugins directory. One name or several |
+| `:Sarcina delete <plugins>` | ask, then delete the named plugins from the plugins directory. One name or several |
 | `:Sarcina clean` | list the plugin directories that are not in your specs |
 | `:Sarcina clean!` | delete them (`:Sarcina! clean` does the same) |
 | `:Sarcina panel` | toggle the window, and go into it |
@@ -260,7 +262,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 **`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. It downloads nothing, and names the plugins that are somewhere else. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
 
-**`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`remove`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are skipped with `setup({ confirm = false })`.
+**`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`delete`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are skipped with `setup({ confirm = false })`.
 
 **`install`** reads your specs from disk and runs the plan of each plugin that has not loaded in this session: one that is not on disk is cloned (`Installing 1: …`), one that is on disk but did not load, such as a spec you just added, is loaded (`Loading 1: …`), and one a failure stopped before it loaded runs again. Each loads the way its spec says, now, later or on a trigger, so it works without a restart. A plugin that loaded, is waiting for its trigger, or is queued is left alone: its `config` does not run twice, and it does not move (that is `update`). A plugin whose `config` failed after it was on the runtimepath counts as loaded; restart Neovim to run it again.
 
@@ -305,6 +307,8 @@ Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.sn
 ## Window
 
 Four windows make one block, 80% of the editor wide and 80% tall, centered: a header across the top, a footer across the bottom, and between them the list of plugins on the left and the details of the one under the cursor on the right. The list and the details scroll; the header and the footer have windows of their own, so they stay in view.
+
+**Keys.** In the list, a lowercase key acts on the plugin under the cursor, or on every plugin in a visual selection, so `Vjjd` deletes three at once. `c` checks, `u` updates, `i` installs, `l` loads and `d` deletes; each runs the command of the same name, so `u` and `d` ask first. `C` and `U` check and update every plugin.
 
 **Views.** In the `main` view the list takes 70% of the width and the details 30%, which leaves each row room for its status message: on a first install or a build you read git's progress, the build's output and any error as they come. `=` in the list switches to the `split` view, 50/50, for longer details, and back; the footer says what `=` switches to (`= 50/50` or `= 70/30`). The view stays for the rest of the session, and `setup({ ui = { view = 'split' } })` starts in `split`.
 

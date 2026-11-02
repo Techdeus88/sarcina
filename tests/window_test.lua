@@ -1066,4 +1066,28 @@ if vim.fn.executable('git') == 1 then
     end)
 end
 
+test('the list keys send check, update, install, load and delete to the plugins under the cursor or selection', function()
+    local plugins = {}
+    for _, name in ipairs({ 'ka', 'kb', 'kc' }) do
+        table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
+    end
+    h.register(plugins)
+    h.run(plugins)
+    local cli = require('sarcina.cli')
+    local dispatch, sent = cli.dispatch, {}
+    cli.dispatch = function(args) table.insert(sent, args.fargs) end
+    with_size(200, 50, function()
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
+        vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+        press('u')
+        press('U')
+        press('l')
+        press('Vjd')
+    end)
+    cli.dispatch = dispatch
+    h.eq(sent, { { 'update', 'kb' }, { 'update' }, { 'load', 'kb' }, { 'delete', 'kb', 'kc' } })
+end)
+
 return tests

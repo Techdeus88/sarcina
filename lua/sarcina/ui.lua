@@ -181,6 +181,48 @@ local function scroll_details(key)
     )
 end
 
+-- list-key -> { subcommand, uses the plugins under the cursor or selection (false: every plugin) }
+local ACTIONS = {
+    c = { 'check', true, 'Check the plugin under the cursor' },
+    C = { 'check', false, 'Check every plugin' },
+    u = { 'update', true, 'Update the plugin under the cursor' },
+    U = { 'update', false, 'Update every plugin' },
+    i = { 'install', true, 'Install the plugin under the cursor' },
+    l = { 'load', true, 'Load the plugin under the cursor' },
+    d = { 'delete', true, 'Delete the plugin under the cursor' },
+}
+
+-- The plugins on the lines the cursor is on, or the lines a visual selection covers, in list order.
+local function plugins_in_selection()
+    local first, last = vim.fn.line('.'), vim.fn.line('.')
+    if vim.fn.mode():match('^[vV\22]') then
+        first, last = math.min(first, vim.fn.line('v')), math.max(first, vim.fn.line('v'))
+    end
+    local names = {}
+    for lnum = first, last do
+        local entry = window().entry_at(lnum)
+        if entry then table.insert(names, entry.name) end
+    end
+    return names
+end
+
+local function map_actions(buf)
+    for key, action in pairs(ACTIONS) do
+        local command, selected, desc = action[1], action[2], action[3]
+        local function run()
+            local fargs = { command }
+            if selected then
+                local names = plugins_in_selection()
+                vim.cmd('normal! \27')
+                if #names == 0 then return end
+                vim.list_extend(fargs, names)
+            end
+            require('sarcina.cli').dispatch({ fargs = fargs, bang = false })
+        end
+        vim.keymap.set({ 'n', 'x' }, key, run, { buffer = buf, nowait = true, desc = desc })
+    end
+end
+
 local function ensure_buffer()
     if buf_valid() then return end
     window().define_highlights()
@@ -192,6 +234,7 @@ local function ensure_buffer()
         function() M.toggle_view() end,
         { buffer = M._bufnr, nowait = true, desc = 'Switch the Sarcina view between 70/30 and 50/50' }
     )
+    map_actions(M._bufnr)
     for _, key in ipairs({ '<C-d>', '<C-u>' }) do
         vim.keymap.set(
             'n',

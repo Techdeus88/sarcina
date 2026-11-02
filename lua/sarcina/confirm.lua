@@ -1,5 +1,5 @@
 -- sarcina/confirm.lua
--- The yes/no question before `update` and `remove`. `setup({ confirm = false })` turns it off.
+-- The yes/no question before `update` and `delete`. `setup({ confirm = false })` turns it off.
 
 local M = {}
 
