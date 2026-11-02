@@ -43,6 +43,10 @@ local OPTIONAL_FIELDS = {
     { key = 'after', type = { 'string', 'function' } },
     { key = 'opts', type = { 'table', 'function' } },
     { key = 'main', type = 'string' },
+    { key = 'commit', type = 'string' },
+    { key = 'tag', type = 'string' },
+    { key = 'branch', type = 'string' },
+    { key = 'version', type = { 'string', 'table', 'boolean' } },
 }
 
 function M.validate_manifest(manifest)
@@ -181,6 +185,9 @@ function M.validate_task(task)
     end
     if task.triggers and not is_table(task.triggers) then
         return fail(string.format('Task %s: `triggers` must be a table.', task.id))
+    end
+    if task.pin ~= nil and not is_table(task.pin) then
+        return fail(string.format('Task %s: `pin` must be a table.', task.id))
     end
     if task.opts and not (is_table(task.opts) or is_function(task.opts)) then
         return fail(string.format('Task %s: `opts` must be a table or a function.', task.id))

@@ -7,6 +7,7 @@ local M = {}
 local ui = require('sarcina.ui')
 local manifest_loader = require('sarcina.manifest')
 local paths = require('sarcina.paths')
+local pins = require('sarcina.pin')
 
 -- Helper: depth‑first search for topological sort.
 local function dfs(name, graph, visited, stack, sorted, path)
@@ -120,6 +121,16 @@ function M.resolve(manifest)
     local function register(plug)
         local name = name_of(plug)
         if not name then return nil end
+        if name_to_spec[name] and not pins.adopt(name_to_spec[name], plug) then
+            ui.emit(
+                'warning',
+                string.format(
+                    '%s is pinned differently by two specs, so %s is kept',
+                    name,
+                    pins.describe(pins.of(name_to_spec[name]))
+                )
+            )
+        end
         if name_to_spec[name] or disabled[name] then return name, false end
         if switched_off(plug) then
             disabled[name] = true
@@ -201,6 +212,20 @@ function M.resolve(manifest)
     local ordered = {}
     for _, name in ipairs(sorted_names) do
         table.insert(ordered, { name = name, spec = name_to_spec[name] })
+    end
+    for _, entry in ipairs(ordered) do
+        local pin, ignored = pins.of(entry.spec)
+        if ignored then
+            ui.emit(
+                'warning',
+                string.format(
+                    '%s: ignoring %s, which %s outranks',
+                    entry.name,
+                    table.concat(ignored, ' and '),
+                    pins.describe(pin)
+                )
+            )
+        end
     end
     -- A plugin with a `dir` lives there, not in the plugins directory.
     paths.reset_dirs()

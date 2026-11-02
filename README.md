@@ -21,10 +21,11 @@ lua/sarcina/
 ├── load.lua          when code runs: now, later, now_if_args, event, ft, keys and cmd, all under safely
 ├── replay.lua        repeats the command, key or event that woke a plugin, after it loads
 ├── startup.lua       splits a resolved manifest into the now phase and the queued rest
-├── installer.lua     queues a resolved manifest and runs it (:Sarcina install)
+├── installer.lua     queues a resolved manifest and runs it, and finds missing and stale plugins
 ├── paths.lua         install and staging locations
 ├── installs.lua      how long each install took, kept in a JSON file for later sessions
 ├── lock.lua          the lock file: the commit of every plugin, which fresh clones are pinned to
+├── pin.lua           what a spec pins a plugin to: a commit, a tag, a version range or a branch
 ├── updater.lua       :Sarcina check and :Sarcina update
 ├── schema.lua        manifest and task validation
 ├── ui.lua            event bus, toasts, and when the window opens
@@ -60,6 +61,7 @@ return {
 | `deps` | plugins that must finish first |
 | `enabled`, `cond` | switch a plugin off with `false`, or with a function that returns false. The function gets the spec, and one that raises leaves the plugin on, with a warning. A plugin that is off is not installed, not loaded, listed by `clean`, and dropped from the `deps` of the others |
 | `dir` | a plugin that lives in a directory of its own, such as one you are working on: `dir = '~/code/my.nvim'`. It is not cloned, and `check` and `update` never touch it. Without a `dir` a plugin is cloned into the plugins directory |
+| `commit`, `tag`, `version`, `branch` | pin the plugin (see [Pins](#pins)): `commit = 'b516f20b'`, `tag = 'v1.4.0'`, `version = '1.*'` or `vim.version.range('1.*')`, `branch = 'master'`. Without one, the plugin follows the remote's default branch |
 | `load` | when the plugin loads: `'now'`, `'now_if_args'` or `'later'` (the default). `lazy = false` means `'now'`. `event = 'VeryLazy'`, from lazy.nvim, means `'later'`, since that is the moment after startup |
 | `init`, `build`, `after` | `init` runs right after the install, `build` after that, and `after` once the plugin has loaded. A function is called with `plugin = { name, dir }`; a `build` function may take a second parameter, `done`, to run async (see below). A string is a Lua chunk, except that a `build` string is a shell command run in the plugin directory (`build = 'make'`), and any string starting with `:` is an Ex command (`build = ':TSUpdate'`). `build` runs only after a fresh clone or when the plugin's commit changes |
 | `config` | called as `config(plugin, opts)` with `plugin = { name, dir }`. `config = true` calls `require(module).setup(opts)`, with `opts` or without, as in lazy.nvim |
@@ -67,6 +69,24 @@ return {
 | `main` | the module to require; found from the plugin name when missing |
 | `event`, `ft`, `cmd`, `keys` | triggers: the plugin loads when one fires. A `keys` entry is `'lhs'` or `{ lhs, rhs, mode = 'n', desc = ..., <keymap options> }`; with an `rhs`, sarcina defines the mapping when the plugin loads |
 | `tasks` | an explicit task list, which skips the generated one |
+
+### Pins
+
+A pin says which commit of a plugin to install, and `:Sarcina update` keeps the plugin there:
+
+| Key | Installs | `update` |
+| --- | --- | --- |
+| `commit` | that commit, given in full or abbreviated | stays there |
+| `tag` | the commit of the tag (an annotated tag is followed to its commit) | stays there |
+| `version` | the highest tag inside the range: `'1.*'`, `'^1.2'`, `'~1.2.3'`, `'>=1.0'`, `'3'`, `'*'`, or a `vim.version.range()`. A tag counts when it reads as a version, with or without a `v`. Prereleases (`v1.3.0-rc1`) are skipped; pin one with `tag` | moves to a higher tag inside the range |
+| `branch` | the tip of the branch | follows the branch |
+| none | the tip of the default branch | follows the default branch |
+
+A `version` string that is not a range is read for what it looks like: hex of 7 to 40 characters with a letter in it is a commit (`version = 'b516f20b'`), and anything else is a branch or tag name (`version = 'main'`). When a spec sets more than one key, `commit` beats `tag`, `tag` beats `version` and `version` beats `branch`, and a warning names the keys that lost.
+
+A plugin can be named by more than one spec, such as an inline dependency `{ 'nvim-lua/plenary.nvim', branch = 'master' }` next to a plain `'nvim-lua/plenary.nvim'`. The first spec is kept, and it takes the pin of a later one when it has none. When two specs pin it differently, the first pin wins and a warning says so.
+
+Changing a pin does not move a plugin that is already installed: run `:Sarcina update`, which moves it to the new pin, back in history too. A pin the remote does not have fails the install, or the update, and says which: `branch nope not found on the remote`, `no tag matches version 5.*`. A short commit cannot be fetched on its own, so the first install of one downloads the plugin's history to find it. The lock file then names it in full, so other installs fetch only that commit. A plugin with a `dir` is never cloned or moved, so its pin does nothing.
 
 Every plugin without a `dir` is cloned to `stdpath('data')/sarcina/plugins/<name>`, and its `doc/` gets a `doc/tags` after the clone, after an update and when it loads, so `:help` finds it. A `doc/tags` that a plugin commits is left as it is. That directory is outside `'packpath'`, so Neovim never loads a plugin on its own. Sarcina adds it to `runtimepath`, with the plugin's `after/` directory behind it, when the plugin's `rtp` task runs. For a `now` plugin that is inside `setup()`, so Neovim sources its `plugin/` files in its own startup pass.
 
@@ -225,8 +245,10 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | Command | Does |
 | --- | --- |
 | `:Sarcina install` | resolve the manifest and run every plugin's tasks |
-| `:Sarcina check [plugins]` | fetch what each plugin's remote has and say which have an update. Nothing is changed |
-| `:Sarcina update [plugins]` | fetch, move each plugin to what its remote has, rebuild what moved, and write the lock file |
+| `:Sarcina sync` | install and load the plugins that are not on disk, and list the directories that are not in your specs |
+| `:Sarcina sync!` | the same, and delete those directories |
+| `:Sarcina check [plugins]` | ask each plugin's remote where the plugin should be, and say which are elsewhere. Nothing is changed |
+| `:Sarcina update [plugins]` | move each plugin to where its remote says it should be, rebuild what moved, and write the lock file |
 | `:Sarcina clean` | list the plugin directories that are not in your specs |
 | `:Sarcina clean!` | delete them (`:Sarcina! clean` does the same) |
 | `:Sarcina panel` | toggle the window, and go into it |
@@ -235,7 +257,9 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 `check` and `update` take plugin names, completed with Tab, and do every plugin of the manifest without any. They read your specs from disk, like `install`, and show up in the window as `checking` and `updating`.
 
-**`update`** fetches the default branch of each plugin (`git fetch --depth 1`), and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
+**`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. It downloads nothing, and names the plugins that are somewhere else. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
+
+**`sync`** makes the plugins directory match your specs. A plugin that is not on disk is cloned and then loaded the way its spec says, now, later or on a trigger, so it works without a restart. A plugin that is on disk is left as it is: its `config` does not run again, and it does not move (that is `update`). The directories no spec owns are listed as `clean` lists them, and `sync!` deletes them. With nothing missing and nothing extra it says `Everything is in sync`. Like `clean`, it refuses an empty manifest.
 
 **`clean`** compares the directories in `stdpath('data')/sarcina/plugins` with the plugins of your specs, dependencies included. It refuses when the manifest is empty or does not resolve, so a spec that failed to load cannot make every plugin look removable. `clean!` also takes the plugin off `runtimepath` and out of the install times and the lock file. A plugin whose spec sets `dir` lives elsewhere and is never touched.
 
@@ -245,11 +269,14 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 ```json
 {
+  "nvim-dap": { "commit": "b516f20b8c0b1c29b2b6f5a7d1e9c3f4a2d6e8b0", "pin": "commit:b516f20b" },
   "telescope.nvim": { "commit": "9b5f7c1e0f6a2d4c8b1e3a7f5d2c9e4b6a8f0d13" }
 }
 ```
 
-It is rewritten after any run that cloned or updated a plugin, and only the plugins of that run change: the other entries stay, so a plugin that failed to install keeps its pin. It also **pins fresh installs**: a clone checks out the commit the lock names, fetching it with `git fetch --depth 1 origin <commit>` when the shallow clone does not have it, and the branch still tracks its remote, so a later `update` moves on from the pin. If the locked commit cannot be fetched, that plugin's install fails with `locked commit 9b5f7c1 is not available`; delete its entry to install the latest. Run `:Sarcina update` to move the pins forward. There is no `restore` command yet.
+A plugin with a [pin](#pins) also keeps the pin its commit came from, such as `"tag:v1.4.0"` or `"version:1.*"`.
+
+It is rewritten after any run that cloned or updated a plugin, and only the plugins of that run change: the other entries stay, so a plugin that failed to install keeps its pin. It also **pins fresh installs**: while the spec asks for the same pin as the entry (or for none, when the entry has none), a clone checks out the commit the lock names, fetching it with `git fetch --depth 1 origin <commit>` when the shallow clone does not have it, and the branch still tracks its remote, so a later `update` moves on from the pin. When the spec's pin has changed since, the entry is passed over and the clone goes where the new pin points. If the locked commit cannot be fetched, that plugin's install fails with `locked commit 9b5f7c1 is not available`; delete its entry to install what the spec asks for. Run `:Sarcina update` to move the pins forward. There is no `restore` command yet.
 
 ## How the task engine works
 
@@ -308,7 +335,7 @@ The time is the run time of all that plugin's tasks added up, not the load alone
 | Key | Is |
 | --- | --- |
 | `state`, `tasks`, `timing` | what the row says, with the plugin's total time |
-| `src`, `path` | the URL it is cloned from (`owner/repo` is `https://github.com/owner/repo`, and a full URL is shown as it is), and the directory it lives in (`dir`, or where it was cloned) |
+| `src`, `pin`, `path` | the URL it is cloned from (`owner/repo` is `https://github.com/owner/repo`, and a full URL is shown as it is), its [pin](#pins) (`tag v1.4.0`, `version 1.*`, `branch master`, `commit b516f20b`, or `ref main` for a `version` that names a branch or tag), and the directory it lives in (`dir`, or where it was cloned) |
 | `rev` | the short commit in that directory, read in the background |
 | `deps`, `triggers`, `armed` | what it needs, what loads it, and whether that is still `waiting`, `loading`, `loaded` or `failed` |
 | `origin` | the spec file it came from |

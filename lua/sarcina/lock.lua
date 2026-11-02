@@ -1,9 +1,10 @@
 -- sarcina/lock.lua
 -- The lock file: the commit of every plugin sarcina installed or updated, in `sarcina-lock.json` in the
 -- config directory, so it can be committed with your specs:
---   { "telescope.nvim": { "commit": "<full sha>" } }
--- A fresh clone checks out the commit named here (see git_clone in executors.lua), and every run that
--- cloned or updated a plugin rewrites its entry. The other entries are kept.
+--   { "telescope.nvim": { "commit": "<full sha>" }, "dap": { "commit": "<full sha>", "pin": "tag:v1.2" } }
+-- A plugin whose spec pins it (see pin.lua) also keeps the pin the commit came from, so that a fresh clone
+-- checks out the commit named here only while the spec still asks for the same (see git_clone in
+-- executors.lua). Every run that cloned or updated a plugin rewrites its entry. The other entries are kept.
 
 local paths = require('sarcina.paths')
 local ui = require('sarcina.ui')
@@ -11,7 +12,7 @@ local ui = require('sarcina.ui')
 local M = {}
 
 local cache -- plugin name -> { commit }, as last read or written
-local marked = {} -- plugin name -> its directory, for the plugins that changed since the last flush
+local marked = {} -- plugin name -> { dir, pin }, for the plugins that changed since the last flush
 local warned = false
 local unreadable = false -- the last read found a file that is not valid JSON, such as one with merge markers
 
@@ -63,15 +64,17 @@ local function write(data)
     return renamed
 end
 
---- The commit the lock file names for a plugin, or nil. A file that is missing or cannot be read has none.
-function M.get(name)
+--- The commit the lock file names for a plugin, or nil. A file that is missing or cannot be read has none, and
+--- neither has an entry made for another pin than `pin` (a string from pin.key, or nil for no pin).
+function M.get(name, pin)
     cache = cache or read()
     local entry = cache[name]
-    return type(entry) == 'table' and entry.commit or nil
+    if type(entry) ~= 'table' or (entry.pin or '') ~= (pin or '') then return nil end
+    return entry.commit
 end
 
---- `name`, cloned or updated into `dir`, is to be written to the lock file at the next `flush`.
-function M.mark(name, dir) marked[name] = dir end
+--- `name`, cloned or updated into `dir` as the spec's `pin` asks, is to be written to the lock file at the next `flush`.
+function M.mark(name, dir, pin) marked[name] = { dir = dir, pin = pin } end
 
 --- Writes the commit (`HEAD`) of every marked plugin to the lock file, keeping the other entries. The commits
 --- are read in parallel. `done(ok)` runs when the file is written, or at once when nothing was marked.
@@ -89,7 +92,7 @@ function M.flush(done)
         if waiting > 0 then return end
         local data = read()
         for name, commit in pairs(found) do
-            data[name] = { commit = commit }
+            data[name] = { commit = commit, pin = pending[name].pin }
         end
         local ok = write(data)
         if done then done(ok) end
@@ -97,7 +100,7 @@ function M.flush(done)
     for _, name in ipairs(names) do
         local spawned = pcall(
             vim.system,
-            { 'git', '-C', pending[name], 'rev-parse', 'HEAD' },
+            { 'git', '-C', pending[name].dir, 'rev-parse', 'HEAD' },
             { text = true },
             function(res)
                 if res.code == 0 then found[name] = vim.trim(res.stdout) end

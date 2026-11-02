@@ -605,6 +605,26 @@ test('the details show where a plugin comes from, what it waits for, and each of
     end)
 end)
 
+test('the details show the pin of a plugin, and no pin line for one without', function()
+    local pinned =
+        { name = 'pinned', repo = 'owner/pinned', version = '1.*', tasks = { h.lua('rtp', h.noop) } }
+    local free = { name = 'free', repo = 'owner/free', tasks = { h.lua('rtp', h.noop) } }
+    h.register({ pinned, free })
+    h.run({ pinned, free })
+    with_size(200, 50, function()
+        ui.open()
+        window.select(window.line('pinned'))
+        window.draw_details(ui._detail_bufnr)
+        local text = details_text()
+        h.ok(text:find('pin%s+version 1%.%*'), text)
+        local src, pin, path = text:find('\nsrc '), text:find('\npin '), text:find('\npath ')
+        h.ok(src and pin and path and src < pin and pin < path, text)
+        window.select(window.line('free'))
+        window.draw_details(ui._detail_bufnr)
+        h.ok(not details_text():find('pin%s'), details_text())
+    end)
+end)
+
 -- The text of each highlighted piece of a line of the details, as { text = group }.
 local function pieces(lnum)
     local ns = vim.api.nvim_get_namespaces().sarcina_details

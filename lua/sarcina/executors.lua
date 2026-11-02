@@ -7,6 +7,7 @@
 
 local lock = require('sarcina.lock')
 local paths = require('sarcina.paths')
+local pins = require('sarcina.pin')
 
 local uv = vim.uv
 
@@ -105,19 +106,108 @@ end
 
 local function short(commit) return commit:sub(1, 7) end
 
--- Makes `dir` sit at `commit`: it is fetched when the clone does not have it, then the branch is moved there,
--- so the branch still tracks its upstream and a later update moves on from it.
-local function pin(dir, commit, cb)
-    git(dir, { 'cat-file', '-e', commit .. '^{commit}' }, function(have)
-        local function reset() git(dir, { 'reset', '--hard', commit }, cb) end
-        if have then return reset() end
-        git(dir, { 'fetch', '--depth', '1', 'origin', commit }, function(fetched, err)
-            if not fetched then return cb(false, err) end
-            reset()
-        end, true)
+-- Whether `head` is the commit `commit` names, which may be abbreviated.
+local function is_commit(head, commit) return head:sub(1, #commit):lower() == commit:lower() end
+
+local function verify(dir, commit, cb) git(dir, { 'rev-parse', '--verify', '-q', commit .. '^{commit}' }, cb) end
+
+-- A server cannot look up an abbreviated commit, so the history comes down until the clone has it.
+local function deepen(dir, cb)
+    git(dir, { 'rev-parse', '--is-shallow-repository' }, function(_, shallow)
+        local args = { 'fetch' }
+        if shallow == 'true' then table.insert(args, '--unshallow') end
+        git(dir, vim.list_extend(args, { 'origin', '+refs/heads/*:refs/remotes/origin/*' }), cb, true)
     end)
 end
 
+-- Makes `dir` sit at `commit`, in full or abbreviated: it is fetched when the clone does not have it, then the
+-- branch is moved there, so the branch still tracks its upstream and a later update moves on from it.
+local function fetch_commit(dir, commit, cb)
+    local function reset(rev) git(dir, { 'reset', '--hard', rev }, cb) end
+    verify(dir, commit, function(have, full)
+        if have then return reset(full) end
+        if #commit == 40 then
+            return git(dir, { 'fetch', '--depth', '1', 'origin', commit }, function(fetched, err)
+                if not fetched then return cb(false, err) end
+                reset(commit)
+            end, true)
+        end
+        deepen(dir, function(deepened, err)
+            if not deepened then return cb(false, err) end
+            verify(dir, commit, function(found, full_commit)
+                if not found then return cb(false, 'the remote has no commit that starts with ' .. commit) end
+                reset(full_commit)
+            end)
+        end)
+    end)
+end
+
+-- Where the remote has what `pin` asks for (the default branch when there is none), as cb(true, target) or
+-- cb(false, why). A target holds `sha` and the `ref` to fetch to get it, and for a version the `tag`; a commit
+-- pin needs no lookup, so its target is the `commit` it names. `remote` is a URL, or 'origin' in a clone, and
+-- git runs in `dir`.
+local function find_target(dir, remote, pin, cb)
+    if pin and pin.kind == 'commit' then return cb(true, { commit = pin.value }) end
+    local kind, name = pin and pin.kind, pin and pin.value
+    local head, tag = 'refs/heads/' .. tostring(name), 'refs/tags/' .. tostring(name)
+    local args = { 'ls-remote' }
+    local candidates
+    if not pin then
+        candidates = { 'HEAD' }
+    elseif kind == 'branch' then
+        candidates = { head }
+    elseif kind == 'tag' then
+        candidates = { tag }
+    elseif kind == 'ref' then
+        candidates = { head, tag }
+    else
+        table.insert(args, '--tags')
+    end
+    table.insert(args, remote)
+    for _, ref in ipairs(candidates or {}) do
+        table.insert(args, ref)
+        if vim.startswith(ref, 'refs/tags/') then table.insert(args, ref .. '^{}') end
+    end
+    git(dir, args, function(ok, out)
+        if not ok then return cb(false, out) end
+        local refs = pins.refs(out)
+        if kind == 'version' then
+            local newest, sha = pins.newest(pin, refs)
+            if not newest then return cb(false, 'no tag matches ' .. pins.describe(pin)) end
+            return cb(true, { sha = sha, ref = 'refs/tags/' .. newest, tag = newest })
+        end
+        for _, ref in ipairs(candidates) do
+            if refs[ref] then return cb(true, { sha = refs[ref], ref = ref }) end
+        end
+        if not pin then return cb(false, 'the remote has no HEAD') end
+        cb(
+            false,
+            kind == 'ref' and name .. ' is not a branch or tag on the remote'
+                or pins.describe(pin) .. ' not found on the remote'
+        )
+    end, true)
+end
+
+-- Moves the clone in `dir` to `target`: what it names is fetched, then the checkout goes there.
+local function move_to(dir, target, report, cb)
+    if target.commit then return fetch_commit(dir, target.commit, cb) end
+    local fetch = remote_git({ 'fetch', '--depth', '1', '--progress', 'origin', target.ref }, dir)
+    run_cmd(fetch, remote_opts(), report, function(fetched, err)
+        vim.schedule(function()
+            if not fetched then return cb(false, err) end
+            git(dir, { 'reset', '--hard', 'FETCH_HEAD^{commit}' }, cb)
+        end)
+    end)
+end
+
+-- The branch or tag to clone for a pin, which `git clone --branch` takes for either.
+local function clone_ref(pin)
+    if pin and (pin.kind == 'branch' or pin.kind == 'tag' or pin.kind == 'ref') then return pin.value end
+end
+
+-- Clones the plugin at the commit the lock file names while the spec still asks for the pin that commit came
+-- from. Otherwise at what the spec's pin asks for: a branch or tag is cloned itself, a version is the highest
+-- tag in its range, a commit is fetched after the clone, and no pin is the default branch.
 function M.git_clone(job, done, report)
     local spec = job.spec
     if not spec.repo then return done(false, 'no repo') end
@@ -128,7 +218,8 @@ function M.git_clone(job, done, report)
     local staging = paths.staging(job.plugin)
     vim.fn.mkdir(vim.fn.fnamemodify(staging, ':h'), 'p')
     vim.fn.mkdir(vim.fn.fnamemodify(dest, ':h'), 'p')
-    local cmd = remote_git({ 'clone', '--depth', '1', '--progress', clone_url(spec.repo), staging })
+    local url, wanted = clone_url(spec.repo), spec.pin
+    local key = wanted and pins.key(wanted)
     local function fail(err)
         vim.fn.delete(staging, 'rf')
         done(false, err)
@@ -137,67 +228,75 @@ function M.git_clone(job, done, report)
         local moved, move_err = uv.fs_rename(staging, dest)
         if not moved then return fail('atomic move failed: ' .. tostring(move_err)) end
         make_helptags(dest)
-        lock.mark(job.plugin, dest)
+        lock.mark(job.plugin, dest, key)
         done(true)
     end
-    run_cmd(cmd, remote_opts(), report, function(ok, err)
-        vim.schedule(function()
-            if not ok then return fail(err) end
-            -- The lock file names the commit this plugin was last installed or updated at.
-            local locked = lock.get(job.plugin)
-            if not locked then return move() end
-            git(staging, { 'rev-parse', 'HEAD' }, function(read, head)
-                if read and head == locked then return move() end
-                pin(staging, locked, function(pinned, why)
-                    if not pinned then
-                        return fail(
-                            string.format('locked commit %s is not available: %s', short(locked), why)
-                        )
-                    end
-                    move()
+    -- `commit`, when given, is checked out after the clone; `label` says where it came from.
+    local function clone(branch, commit, label)
+        local args = { 'clone', '--depth', '1', '--progress' }
+        if branch then vim.list_extend(args, { '--branch', branch }) end
+        run_cmd(remote_git(vim.list_extend(args, { url, staging })), remote_opts(), report, function(ok, err)
+            vim.schedule(function()
+                if not ok then return fail(err) end
+                if not commit then return move() end
+                git(staging, { 'rev-parse', 'HEAD' }, function(read, head)
+                    if read and is_commit(head, commit) then return move() end
+                    fetch_commit(staging, commit, function(fetched, why)
+                        if not fetched then
+                            return fail(
+                                string.format('%s %s is not available: %s', label, short(commit), why)
+                            )
+                        end
+                        move()
+                    end)
                 end)
             end)
         end)
-    end)
+    end
+    local locked = lock.get(job.plugin, key)
+    if locked then return clone(clone_ref(wanted), locked, 'locked commit') end
+    if wanted and wanted.kind == 'commit' then return clone(nil, wanted.value, 'commit') end
+    if wanted and wanted.kind == 'version' then
+        return find_target(vim.fn.fnamemodify(staging, ':h'), url, wanted, function(found, target)
+            if not found then return fail(target) end
+            clone(target.tag)
+        end)
+    end
+    clone(clone_ref(wanted))
 end
 
--- `check` or `update` of a plugin: fetches what its remote has, compares that with `HEAD`, and for `update`
--- (`spec.apply`) moves there. Its note says what happened. A plugin with changes of its own is left as it is.
+-- `check` or `update` of a plugin: asks its remote where the plugin should be (see find_target), compares that
+-- with `HEAD`, and for `update` (`spec.apply`) moves there. Its note says what happened. A plugin with changes of
+-- its own is left as it is.
 function M.git_update(job, done, report)
     local spec = job.spec
     local dir = paths.install(job.plugin)
     if not uv.fs_stat(dir) then return done(true, 'not installed') end
     job.working = true
     report()
-    run_cmd(
-        remote_git({ 'fetch', '--depth', '1', '--progress', 'origin' }, dir),
-        remote_opts(),
-        report,
-        function(fetched, err)
-            vim.schedule(function()
-                if not fetched then return done(false, err) end
-                git(dir, { 'rev-parse', 'HEAD', '@{u}' }, function(read, out)
-                    local head, upstream = out:match('^(%x+)%s+(%x+)')
-                    if not read or not head then return done(false, read and 'no upstream branch' or out) end
-                    if spec.apply then lock.mark(job.plugin, dir) end
-                    if head == upstream then return done(true, 'up to date') end
-                    local change = short(head) .. ' → ' .. short(upstream)
-                    if not spec.apply then return done(true, 'update available ' .. change) end
-                    git(dir, { 'status', '--porcelain', '--untracked-files=no' }, function(_, changes)
-                        if changes ~= '' then return done(true, 'skipped: local changes') end
-                        git(dir, { 'reset', '--hard', '@{u}' }, function(moved, why)
-                            if not moved then return done(false, why) end
-                            -- Help the update brought is findable too, unless the plugin commits its own tags.
-                            git(dir, { 'ls-files', 'doc/tags' }, function(_, tracked)
-                                if tracked == '' then make_helptags(dir, true) end
-                                done(true, change)
-                            end)
-                        end)
+    local wanted = spec.pin
+    find_target(dir, 'origin', wanted, function(found, target)
+        if not found then return done(false, target) end
+        git(dir, { 'rev-parse', 'HEAD' }, function(read, head)
+            if not read then return done(false, head) end
+            if spec.apply then lock.mark(job.plugin, dir, wanted and pins.key(wanted)) end
+            local goal = target.sha or target.commit
+            if is_commit(head, goal) then return done(true, 'up to date') end
+            local change = short(head) .. ' → ' .. short(goal)
+            if not spec.apply then return done(true, 'update available ' .. change) end
+            git(dir, { 'status', '--porcelain', '--untracked-files=no' }, function(_, changes)
+                if changes ~= '' then return done(true, 'skipped: local changes') end
+                move_to(dir, target, report, function(moved, why)
+                    if not moved then return done(false, why) end
+                    -- Help the update brought is findable too, unless the plugin commits its own tags.
+                    git(dir, { 'ls-files', 'doc/tags' }, function(_, tracked)
+                        if tracked == '' then make_helptags(dir, true) end
+                        done(true, change)
                     end)
                 end)
             end)
-        end
-    )
+        end)
+    end)
 end
 
 function M.make(job, done, report)

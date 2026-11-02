@@ -4,6 +4,7 @@
 -- and the lock file is rewritten by the run that did it (see lock.lua).
 
 local paths = require('sarcina.paths')
+local pins = require('sarcina.pin')
 local stats = require('sarcina.stats')
 local tasks = require('sarcina.tasks')
 local ui = require('sarcina.ui')
@@ -39,7 +40,15 @@ local function installed(entry) return vim.uv.fs_stat(paths.install(entry.name))
 -- A plugin's tasks for the run: the fetch, and for an update the plugin's own build, which `per_commit` runs
 -- only when the plugin moved. The fetches start together and every build waits for all of them.
 local function plan(entry, mode)
-    local list = { { id = mode, type = 'git_update', apply = mode == 'update', phase = 'install' } }
+    local list = {
+        {
+            id = mode,
+            type = 'git_update',
+            apply = mode == 'update',
+            pin = pins.of(entry.spec),
+            phase = 'install',
+        },
+    }
     if mode == 'update' then
         for _, task in ipairs(entry.spec.tasks or {}) do
             if task.id == 'build' then table.insert(list, task) end

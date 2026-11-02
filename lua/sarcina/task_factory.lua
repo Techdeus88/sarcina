@@ -7,6 +7,7 @@
 
 local keys = require('sarcina.keys')
 local main_module = require('sarcina.main_module')
+local pins = require('sarcina.pin')
 
 local M = {}
 
@@ -44,11 +45,11 @@ local function lua_task(id, value, opts)
     return task
 end
 
--- Clones the plugin's repo. A spec without a repo, or with a `dir` of its own, is a local plugin and has
--- nothing to install.
+-- Clones the plugin's repo, at the pin of the spec (see pin.lua). A spec without a repo, or with a `dir` of
+-- its own, is a local plugin and has nothing to install.
 local function install_task(spec)
     if not spec.repo or spec.dir then return nil end
-    return { id = 'install', type = 'git_clone', repo = spec.repo, phase = 'install' }
+    return { id = 'install', type = 'git_clone', repo = spec.repo, pin = pins.of(spec), phase = 'install' }
 end
 
 -- A string `build` is a shell command, or an Ex command when it starts with ':'. It runs only when the

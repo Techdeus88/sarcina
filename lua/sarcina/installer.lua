@@ -8,6 +8,7 @@ local installs = require('sarcina.installs')
 local lock = require('sarcina.lock')
 local paths = require('sarcina.paths')
 local tasks = require('sarcina.tasks')
+local track = require('sarcina.track')
 local ui = require('sarcina.ui')
 
 --- Queue every task for a single plugin.
@@ -24,6 +25,23 @@ function M.install_all(resolved, on_done, opts)
         M.install_one(entry.name, entry.spec)
     end
     tasks.run_all(on_done, opts)
+end
+
+-- Whether a plugin's plan is queued or running, or got far enough this session that running it again would call
+-- its config twice: it is on the runtimepath, or its trigger is armed.
+local function under_way(name)
+    for _, job in ipairs(track.jobs_of(name)) do
+        if job.status == 'pending' or job.status == 'running' then return true end
+        if (job.id == 'rtp' or job.id == 'load_trigger') and job.status == 'done' then return true end
+    end
+    return false
+end
+
+--- The plugins of `resolved` whose plan has to run: the ones that have not loaded, are not waiting for a trigger
+--- and are not queued in this session, such as a plugin that is not on disk, one new in your specs, or one that a
+--- failure stopped before it loaded.
+function M.pending(resolved)
+    return vim.tbl_filter(function(entry) return not under_way(entry.name) end, resolved)
 end
 
 --- The directories in the plugins directory that no plugin of `resolved` owns, by name. Files are not plugins,

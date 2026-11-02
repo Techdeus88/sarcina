@@ -12,11 +12,9 @@ local function fake_git(body)
     local bin, log = vim.fn.tempname(), vim.fn.tempname()
     vim.fn.mkdir(bin, 'p')
     local script = bin .. '/git'
-    vim.fn.writefile({
-        '#!/bin/sh',
-        'echo "PROMPT=$GIT_TERMINAL_PROMPT GCM=$GCM_INTERACTIVE ARGS=$*" >> "' .. log .. '"',
-        body,
-    }, script)
+    local lines =
+        { '#!/bin/sh', 'echo "PROMPT=$GIT_TERMINAL_PROMPT GCM=$GCM_INTERACTIVE ARGS=$*" >> "' .. log .. '"' }
+    vim.fn.writefile(vim.list_extend(lines, vim.split(body, '\n')), script)
     vim.uv.fs_chmod(script, 493)
     local old = vim.env.PATH
     vim.env.PATH = bin .. ':' .. old
@@ -41,20 +39,41 @@ test('a clone never asks a question, and drops a transfer that has stalled', fun
     assert(ok, err)
 end)
 
-test('a fetch for an update or a check never asks a question either', function()
+-- Answers the lookup of the remote and the commit of the plugin, says the plugin has no changes, and refuses the rest.
+local LOOKS_BEHIND = table.concat({
+    'case "$*" in',
+    '*ls-remote*) printf "' .. string.rep('a', 40) .. '\\tHEAD\\n";;',
+    '*rev-parse*) echo ' .. string.rep('b', 40) .. ';;',
+    '*status*) ;;',
+    '*) ' .. REFUSES .. ';;',
+    'esac',
+}, '\n')
+
+test('the lookup of a check and the fetch of an update never ask a question either', function()
+    vim.fn.mkdir(paths.install('looky.nvim'), 'p')
     vim.fn.mkdir(paths.install('fetchy.nvim'), 'p')
-    local log, restore = fake_git(REFUSES)
+    local log, restore = fake_git(LOOKS_BEHIND)
     local ok, err = pcall(function()
-        h.run({
-            {
-                name = 'fetchy.nvim',
-                tasks = { { id = 'check', type = 'git_update', apply = false, phase = 'install' } },
-            },
-        })
-        h.eq(h.job('fetchy.nvim', 'check').status, 'failed')
-        local said = logged(log)
-        h.ok(said:find('PROMPT=0 GCM=never', 1, true), said)
-        h.ok(said:find('lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch --depth 1', 1, true), said)
+        local function plan(id, apply)
+            return { { id = id, type = 'git_update', apply = apply, phase = 'install' } }
+        end
+        h.run({ { name = 'looky.nvim', tasks = plan('check', false) } })
+        local looked = logged(log)
+        h.ok(looked:find('PROMPT=0 GCM=never', 1, true), looked)
+        h.ok(looked:find('lowSpeedLimit=1000 -c http.lowSpeedTime=60 ls-remote origin HEAD', 1, true), looked)
+        h.eq(h.job('looky.nvim', 'check').note, 'update available bbbbbbb → aaaaaaa')
+        h.run({ { name = 'fetchy.nvim', tasks = plan('update', true) } })
+        h.eq(h.job('fetchy.nvim', 'update').status, 'failed')
+        local fetched = logged(log)
+        h.ok(fetched:find('PROMPT=0 GCM=never', 1, true), fetched)
+        h.ok(
+            fetched:find(
+                'lowSpeedLimit=1000 -c http.lowSpeedTime=60 fetch --depth 1 --progress origin HEAD',
+                1,
+                true
+            ),
+            fetched
+        )
     end)
     restore()
     assert(ok, err)
