@@ -15,6 +15,8 @@ M.close_delay = 3000
 M.show = 'auto'
 -- Whether opening the window looks for updates (see checker.lua). Off, `C` in the window or :Sarcina check does it.
 M.check_on_open = true
+-- How long a window that opens by itself waits for a colorscheme, ms. See `theme_ready`.
+M.theme_wait = 2000
 
 M._listeners = {}
 M._messages = {} -- every message of the session, as { msg, level }, for tests and for ui.messages()
@@ -37,6 +39,8 @@ M._want = false -- an event since the last flush asked for the window
 M._full = false -- the next flush redraws every line
 M._flush_pending = false
 M._check_after_run = false -- the window opened during a run, so it checks for updates when the run ends
+M._theme_timer = false -- the wait for a colorscheme has started
+M._theme_waited = false -- the wait for a colorscheme is over, with or without one
 
 local SHOW = { auto = true, always = true, never = true }
 local LEVELS = {
@@ -495,8 +499,23 @@ local function open_window(enter)
     if M.check_on_open then M.check(true) end
 end
 
+-- A window that opens by itself waits for the colorscheme, so it is not drawn in Neovim's default colours and
+-- redrawn in the theme's a moment later, as on a startup that installs the colorscheme. A ColorScheme opens it,
+-- and after `theme_wait` ms it opens anyway, for a setup that has no colorscheme.
+local function theme_ready()
+    if vim.g.colors_name ~= nil or M._theme_waited then return true end
+    if not M._theme_timer then
+        M._theme_timer = true
+        vim.defer_fn(function()
+            M._theme_waited = true
+            M._flush()
+        end, M.theme_wait)
+    end
+    return false
+end
+
 -- Redraws what changed since the last flush, and opens the window when an event asked for it. A failure
--- the user has not seen reopens a dismissed window.
+-- the user has not seen reopens a dismissed window, and does not wait for the colorscheme.
 function M._flush()
     M._flush_pending = false
     local dirty, want, full = M._dirty, M._want, M._full
@@ -509,6 +528,10 @@ function M._flush()
     end
     if not win_valid() then
         if M.show == 'never' or not (want or unseen) then return end
+        if not unseen and not theme_ready() then
+            M._want = true
+            return
+        end
         return open_window(false)
     end
     local redrawn = full
@@ -755,7 +778,14 @@ function M.init()
         'User',
         { group = group, pattern = 'SarcinaReady', callback = schedule_flush }
     )
-    vim.api.nvim_create_autocmd('ColorScheme', { group = group, callback = window().define_highlights })
+    vim.api.nvim_create_autocmd('ColorScheme', {
+        group = group,
+        callback = function()
+            window().define_highlights()
+            -- A window that waited for the colorscheme opens now.
+            if M._want then schedule_flush() end
+        end,
+    })
 end
 
 return M

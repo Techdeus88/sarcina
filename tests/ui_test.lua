@@ -238,6 +238,37 @@ test('show = always opens the window when the startup run starts, even when it i
     h.ok(vim.wait(200, win_open), 'the window did not open at the start of the run')
 end)
 
+test('real work waits for the colorscheme before it opens the window', function()
+    ui.init()
+    vim.g.colors_name = nil
+    h.register({ working('w') })
+    tasks.enqueue('w', working('w'))
+    tasks.run_all()
+    vim.wait(100)
+    h.eq(win_open(), false)
+    vim.cmd.colorscheme('default')
+    h.ok(vim.wait(200, win_open), 'the window did not open once the colorscheme was applied')
+    h.ok(tasks.wait(2000))
+end)
+
+test('with no colorscheme the window opens after theme_wait', function()
+    vim.g.colors_name = nil
+    ui.theme_wait = 150
+    h.register({ working('w') })
+    tasks.enqueue('w', working('w'))
+    tasks.run_all()
+    vim.wait(80)
+    h.eq(win_open(), false)
+    h.ok(vim.wait(300, win_open), 'the window never opened without a colorscheme')
+    h.ok(tasks.wait(2000))
+end)
+
+test('a failure opens the window without waiting for the colorscheme', function()
+    vim.g.colors_name = nil
+    run({ failing('a') })
+    h.ok(vim.wait(200, win_open))
+end)
+
 test('show falls back to auto for a value it does not know', function()
     ui.configure({ show = 'sometimes' })
     h.eq(ui.show, 'auto')
