@@ -64,6 +64,8 @@ function M.reset()
     require('sarcina.installer').removed = 0
     require('sarcina.window').changelog = false
     require('sarcina.window').height = 'regular'
+    require('sarcina.window').select_mode = false
+    require('sarcina.window').clear_marks()
     ui.close_delay = 60000
 end
 

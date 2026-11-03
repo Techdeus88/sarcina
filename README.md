@@ -307,7 +307,7 @@ Job statuses are `pending`, `running`, `done`, `failed` and `skipped`. `tasks.sn
 
 ## Window
 
-Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, see Heights), centered: a header across the top, a footer across the bottom, and between them the list of plugins on the left and the details of the one under the cursor on the right. The list and the details scroll; the header and the footer have windows of their own, so they stay in view.
+Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, see Heights), centered: a header across the top, a footer across the bottom, and between them the list of plugins on the left and the details of the one under the cursor on the right. The list and the details scroll; the header and the footer have windows of their own, so they stay in view. The list and the details each start and end with a blank line, so their content keeps off the borders.
 
 **Select view.** `v` in the list opens it: every row gets a checkbox, `○` and `✔` once picked, and `Space` picks or drops the plugin under the cursor. The footer lists the picks as pills, `Selected 2 ✔ cmp ✔ lsp`, and ends in `+N` when they do not all fit. The keys below then act on every pick, and leave the view when they do. `v` again leaves it and drops every pick. `Space` does nothing outside the view.
 
@@ -323,6 +323,7 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 │ ● 3  ○ 3                                       13/25 tasks                      ⤓ 18 installed  ✘ 1 failed │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭ Updates (1) <CR> changelog ──────────────────────────────────────────────╮╭ nvim-treesitter ───────────────╮
+│                                                                          ││                                │
 │    ↑ nvim-treesitter 0195cd6 feat(jinja)… · 1 commit behind  △ 1 breaking││state     ✔ loaded              │
 │                                                                          ││tasks     4/4 tasks ✔ 40ms      │
 │ Now (1)                                                                  ││timing    later                 │
@@ -336,6 +337,7 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 │                                                                          ││Changelog                       │
 │ Triggered (1)                                                            ││ △ 0195cd6 feat(jinja)!:        │
 │   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││   update parser and queries    │
+│                                                                          ││                                │
 ╰──────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────╯
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
 │ v to select plugins                                                                          Startup: 83ms │

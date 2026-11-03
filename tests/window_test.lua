@@ -1130,17 +1130,18 @@ test(
         vim.o.columns, vim.o.lines = 200, 50
         ui.open()
         vim.api.nvim_set_current_win(ui._winid)
-        -- 1 Now, 2 n1, 3 blank, 4 Later, 5 l1, 6 l2
+        -- 1 blank, 2 Now, 3 n1, 4 blank, 5 Later, 6 l1, 7 l2, 8 blank
         local function move(lnum)
             vim.api.nvim_win_set_cursor(ui._winid, { lnum, 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
             return vim.api.nvim_win_get_cursor(ui._winid)[1], window.selected()
         end
-        h.eq({ move(2) }, { 2, 'n1' })
-        h.eq({ move(3) }, { 5, 'l1' }) -- down onto the blank line: on to l1
-        h.eq({ move(6) }, { 6, 'l2' })
-        h.eq({ move(4) }, { 2, 'n1' }) -- up onto the Later header: back to n1
-        h.eq({ move(1) }, { 2, 'n1' }) -- nothing above the first header: the first plugin below it
+        h.eq({ move(3) }, { 3, 'n1' })
+        h.eq({ move(4) }, { 6, 'l1' }) -- down onto the blank line: on to l1
+        h.eq({ move(7) }, { 7, 'l2' })
+        h.eq({ move(8) }, { 7, 'l2' }) -- nothing below the last plugin: back to it
+        h.eq({ move(5) }, { 3, 'n1' }) -- up onto the Later header: back to n1
+        h.eq({ move(1) }, { 3, 'n1' }) -- nothing above the first header: the first plugin below it
         h.eq(title_of(ui._detail_winid), ' n1 ')
     end
 )
@@ -1149,21 +1150,25 @@ test('a line with no plugin shows no details', function()
     h.register({ loaded('a') })
     vim.o.columns, vim.o.lines = 200, 50
     ui.open()
-    window.select(1) -- the Later header
+    window.select(2) -- the Later header
     h.eq(window.selected(), nil)
     h.eq(window.draw_details(ui._detail_bufnr), nil)
     h.eq(details(), { '' })
-    window.select(2)
+    window.select(3)
     h.eq(window.draw_details(ui._detail_bufnr), 'a')
+    -- A blank line above the details and one below them.
+    h.eq({ details()[1], details()[2]:find('^state') ~= nil, details()[#details()] }, { '', true, '' })
 end)
 
 test('entry_at maps the lines of the list to their plugins', function()
     h.register({ loaded('a'), loaded('b') })
     ui.open()
-    h.eq(window.entry_at(1), { kind = 'section' })
-    h.eq(window.entry_at(2), { kind = 'plugin', name = 'a' })
-    h.eq(window.entry_at(3), { kind = 'plugin', name = 'b' })
-    h.eq(window.entry_at(4), nil)
+    h.eq(window.entry_at(1), { kind = 'blank' })
+    h.eq(window.entry_at(2), { kind = 'section' })
+    h.eq(window.entry_at(3), { kind = 'plugin', name = 'a' })
+    h.eq(window.entry_at(4), { kind = 'plugin', name = 'b' })
+    h.eq(window.entry_at(5), { kind = 'blank' })
+    h.eq(window.entry_at(6), nil)
 end)
 
 test('an install of what is already on disk never opens the window', function()

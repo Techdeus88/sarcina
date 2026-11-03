@@ -8,8 +8,20 @@ local paths = require('sarcina.paths')
 local resolver = require('sarcina.resolver')
 local ui = require('sarcina.ui')
 
-local SUBCOMMANDS =
-    { 'add', 'delete', 'install', 'load', 'sync', 'clean', 'check', 'update', 'stats', 'panel', 'log', 'help' }
+local SUBCOMMANDS = {
+    'add',
+    'delete',
+    'install',
+    'load',
+    'sync',
+    'clean',
+    'check',
+    'update',
+    'stats',
+    'panel',
+    'log',
+    'help',
+}
 
 local subcommands = {}
 

@@ -146,7 +146,9 @@ test(
         window.rounded = false
         ui.open()
         window.rounded = true
+        -- A blank line above the content and below it keeps it off the borders.
         h.eq(buffer_lines(), {
+            '',
             ' Now (1)',
             '   n1 now  0/0  tasks …  pending',
             '',
@@ -156,9 +158,11 @@ test(
             '',
             ' Triggered (1)',
             '   t1 trigger  0/0  tasks …  pending',
+            '',
         })
-        h.eq(window.entry_at(1), { kind = 'section' })
-        h.eq(window.entry_at(3), { kind = 'blank' })
+        h.eq(window.entry_at(1), { kind = 'blank' })
+        h.eq(window.entry_at(2), { kind = 'section' })
+        h.eq(window.entry_at(4), { kind = 'blank' })
     end
 )
 
@@ -185,15 +189,17 @@ test('while a check runs the list title says checking, and then the list starts 
     local list, detail = vim.api.nvim_win_get_config(ui._winid), vim.api.nvim_win_get_config(ui._detail_winid)
     h.eq(list.row, detail.row)
     local lines = buffer_lines()
+    h.eq(lines[1], '')
     h.eq(
-        lines[1],
+        lines[2],
         '    ↑ upd.nvim ' .. h.head(remote):sub(1, 7) .. ' feat: two · 3 commits behind  △ 2 breaking'
     )
-    h.eq(lines[2], '')
-    h.eq(lines[3], ' Later (2)')
-    h.eq(window.entry_at(1), { kind = 'update', name = 'upd.nvim' })
+    h.eq(lines[3], '')
+    h.eq(lines[4], ' Later (2)')
+    h.eq(lines[#lines], '')
+    h.eq(window.entry_at(2), { kind = 'update', name = 'upd.nvim' })
     -- The cursor moves onto an update, and the details show that plugin.
-    vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
+    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
     vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
     h.eq(window.selected(), 'upd.nvim')
     h.ok(details_text():find('update%s+%x+ · 3 commits behind  △ 2 breaking'), details_text())
@@ -208,7 +214,7 @@ test('a check that found nothing says up to date, and with nothing to check the 
     check()
     ui._flush()
     h.eq(list_title(), ' Updates (0) ✔ up to date ')
-    h.eq(buffer_lines()[1], ' Later (1)')
+    h.eq(buffer_lines()[2], ' Later (1)')
     checker._reset()
     h.register({ { name = 'nothing' } })
     check()
@@ -224,7 +230,7 @@ test('enter shows the changelog of an update in the details, and enter again sho
     check()
     ui._flush()
     vim.api.nvim_set_current_win(ui._winid)
-    vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
+    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
     vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
     vim.api.nvim_feedkeys(vim.keycode('<CR>'), 'xt', false)
     local text = details_text()
@@ -310,11 +316,11 @@ test('in the select view an update row has a pick box, and Space picks its plugi
     vim.api.nvim_set_current_win(ui._winid)
     local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
     press('v')
-    h.ok(buffer_lines()[1]:find('^ ○  ↑ pick%.nvim'), buffer_lines()[1])
-    vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
+    h.ok(buffer_lines()[2]:find('^ ○  ↑ pick%.nvim'), buffer_lines()[2])
+    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
     press('<Space>')
     h.eq(window.marked(), { 'pick.nvim' })
-    h.ok(buffer_lines()[1]:find('^ ✔  ↑ pick%.nvim'), buffer_lines()[1])
+    h.ok(buffer_lines()[2]:find('^ ✔  ↑ pick%.nvim'), buffer_lines()[2])
     -- The same plugin is picked in its section too.
     local row = buffer_lines()[window.line('pick.nvim')]
     h.ok(row:find('^ ✔ pick%.nvim'), row)

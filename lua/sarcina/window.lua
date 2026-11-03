@@ -448,6 +448,8 @@ local function layout(list)
         table.insert(lines, line)
         entries[#lines] = entry
     end
+    -- A blank line above the content and one below it, so it does not touch the borders.
+    add(build_line({}), { kind = 'blank' })
     local check = checker().state()
     local found = {}
     for _, row in ipairs(list) do
@@ -460,7 +462,7 @@ local function layout(list)
     for _, section in ipairs(SECTIONS) do
         local members = by_timing[section.timing]
         if #members > 0 then
-            if #lines > 0 then add(build_line({}), { kind = 'blank' }) end
+            if #lines > 1 then add(build_line({}), { kind = 'blank' }) end
             add(section_line(section.title, #members), { kind = 'section' })
             for _, row in ipairs(members) do
                 table.insert(names, row.name)
@@ -470,6 +472,7 @@ local function layout(list)
             end
         end
     end
+    add(build_line({}), { kind = 'blank' })
     return lines
 end
 
@@ -1024,6 +1027,9 @@ function M.draw_details(buf)
         else
             vim.list_extend(lines, task_lines(selected))
         end
+        -- A blank line above the details and one below them, as in the list.
+        table.insert(lines, 1, build_line({}))
+        table.insert(lines, build_line({}))
     end
     vim.api.nvim_buf_clear_namespace(buf, DETAIL_NS, 0, -1)
     put(buf, DETAIL_NS, 1, vim.api.nvim_buf_line_count(buf), #lines > 0 and lines or { build_line({}) })

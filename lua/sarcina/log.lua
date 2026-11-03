@@ -31,7 +31,13 @@ function M.write(level, text)
     end
     local file = io.open(path, 'a')
     if not file then return end
-    file:write(os.date('%Y-%m-%d %H:%M:%S '), NAMES[level] or 'INFO ', ' ', (text:gsub('%s*\n%s*', ' | ')), '\n')
+    file:write(
+        os.date('%Y-%m-%d %H:%M:%S '),
+        NAMES[level] or 'INFO ',
+        ' ',
+        (text:gsub('%s*\n%s*', ' | ')),
+        '\n'
+    )
     file:close()
 end
 

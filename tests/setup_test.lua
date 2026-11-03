@@ -42,7 +42,14 @@ test('setup warns about a plugin on disk that no spec owns, and about nothing el
     local dir = vim.fn.stdpath('config') .. '/lua/plugins'
     vim.fn.mkdir(dir, 'p')
     local file = dir .. '/stale_setup.lua'
-    vim.fn.writefile({ 'return {', "    { name = 'kept', tasks = { { id = 'a', type = 'lua', fn = function() end } } },", '}' }, file)
+    vim.fn.writefile(
+        {
+            'return {',
+            "    { name = 'kept', tasks = { { id = 'a', type = 'lua', fn = function() end } } },",
+            '}',
+        },
+        file
+    )
     vim.fn.mkdir(paths.install('forgotten.nvim'), 'p')
     require('sarcina').setup()
     h.ok(tasks.wait(2000))
