@@ -45,12 +45,22 @@ local function finished()
     h.ok(vim.wait(10000, function() return not checker.state().running end, 20))
 end
 
+-- What the check found for `name`, with its commits read the way the window reads them when it shows the plugin.
+local function read(name)
+    checker.read(name)
+    h.ok(
+        vim.wait(10000, function() return checker.update_of(name).read end, 20),
+        'the commits were never read'
+    )
+    return checker.update_of(name)
+end
+
 -- What a check of everything finds for Sarcina, from a fresh start.
 local function own_update()
     checker._reset()
     checker.run()
     finished()
-    return checker.update_of('sarcina')
+    return checker.update_of('sarcina') and read('sarcina')
 end
 
 test('Sarcina runs from the repository its files are in', function()
@@ -103,7 +113,7 @@ test('a check of everything looks at Sarcina first, alone, and then at the plugi
     assert(ok, err)
     h.eq(order, { dir, paths.install('dep.nvim') })
     h.eq(overlapped, false)
-    local own = checker.update_of('sarcina')
+    local own = read('sarcina')
     h.eq(vim.tbl_map(function(c) return c.subject end, own.commits), { 'feat: sarcina 2', 'feat: sarcina 1' })
     h.ok(checker.update_of('dep.nvim'), 'the plugin was not checked')
     -- A full clone stays full: looking ahead does not cut its history.
@@ -118,8 +128,8 @@ test("Sarcina's own update is found by a check but takes no line in the window",
     checker.run()
     finished()
     ui._flush()
-    local update = checker.update_of('sarcina')
-    h.ok(update, 'the check did not find the update of Sarcina')
+    h.ok(checker.update_of('sarcina'), 'the check did not find the update of Sarcina')
+    local update = read('sarcina')
     h.eq(vim.tbl_map(function(c) return c.subject end, update.commits), { 'feat: sarcina 1' })
     local text = table.concat(vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false), '\n')
     h.eq(text:find('sarcina', 1, true), nil)

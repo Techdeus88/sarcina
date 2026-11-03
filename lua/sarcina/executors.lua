@@ -104,6 +104,21 @@ local function git(dir, args, cb, network)
     if not spawned then vim.schedule(function() cb(false, 'git is not available') end) end
 end
 
+-- Two fetches into the same clone must not overlap, or one fails on the lock of the other: a read of the commits
+-- ahead (see read_ahead) can still be running when an update moves the plugin. `fn(release)` runs once the one
+-- before it in `dir` has called its `release`.
+local writing = {}
+local function exclusive(dir, fn)
+    local function release()
+        local next_fn = table.remove(writing[dir], 1)
+        if next_fn then return next_fn(release) end
+        writing[dir] = nil
+    end
+    if writing[dir] then return table.insert(writing[dir], fn) end
+    writing[dir] = {}
+    fn(release)
+end
+
 local function short(commit) return commit:sub(1, 7) end
 
 -- Whether `head` is the commit `commit` names, which may be abbreviated.
@@ -286,12 +301,15 @@ function M.git_update(job, done, report)
             if not spec.apply then return done(true, 'update available ' .. change) end
             git(dir, { 'status', '--porcelain', '--untracked-files=no' }, function(_, changes)
                 if changes ~= '' then return done(true, 'skipped: local changes') end
-                move_to(dir, target, report, function(moved, why)
-                    if not moved then return done(false, why) end
-                    -- Help the update brought is findable too, unless the plugin commits its own tags.
-                    git(dir, { 'ls-files', 'doc/tags' }, function(_, tracked)
-                        if tracked == '' then make_helptags(dir, true) end
-                        done(true, change)
+                exclusive(dir, function(release)
+                    move_to(dir, target, report, function(moved, why)
+                        release()
+                        if not moved then return done(false, why) end
+                        -- Help the update brought is findable too, unless the plugin commits its own tags.
+                        git(dir, { 'ls-files', 'doc/tags' }, function(_, tracked)
+                            if tracked == '' then make_helptags(dir, true) end
+                            done(true, change)
+                        end)
                     end)
                 end)
             end)
@@ -307,9 +325,9 @@ local function breaking(subject, body)
         or body:match('BREAKING[ -]CHANGE') ~= nil
 end
 
--- The commits after `HEAD` up to what was fetched last, newest first, as { sha, subject, breaking }.
-local function commits_ahead(dir, cb)
-    git(dir, { 'log', '--format=%H%x1f%s%x1f%b%x1e', 'HEAD..FETCH_HEAD' }, function(ok, out)
+-- The commits after `HEAD` up to `to`, newest first, as { sha, subject, breaking }.
+local function commits_ahead(dir, to, cb)
+    git(dir, { 'log', '--format=%H%x1f%s%x1f%b%x1e', 'HEAD..' .. to }, function(ok, out)
         if not ok then return cb(nil) end
         local list = {}
         for record in out:gmatch('[^\30]+') do
@@ -324,9 +342,9 @@ end
 
 --- Whether the plugin in `dir` is where `pin` asks for (see find_target), without moving it: cb(nil) when it is,
 --- cb(info) when it is not, and cb(false, why) when the remote could not say. `info` has `from` and `to`, the
---- commits it is at and should be at, and `commits`, the commits in between, newest first, as
---- { sha, subject, breaking }. Only the commits after the one the plugin is at are fetched, and only for a
---- plugin that is behind; `commits` is nil when they could not be, and for a commit pin.
+--- commits it is at and should be at, and for a branch or a tag the `ref` and the commit `time` of `from` that
+--- read_ahead needs. Only the remote's refs are asked for: nothing is fetched, so a check of many plugins costs
+--- one round trip each.
 function M.look_ahead(dir, pin, cb)
     find_target(dir, 'origin', pin, function(found, target)
         if not found then return cb(false, target) end
@@ -335,24 +353,32 @@ function M.look_ahead(dir, pin, cb)
             if not read or not head then return cb(false, read and 'no commit' or out) end
             local goal = target.sha or target.commit
             if is_commit(head, goal) then return cb(nil) end
-            local info = { from = head, to = goal }
-            if target.commit then return cb(info) end
-            -- A shallow clone fetches from a day before the plugin's commit, so that commit and everything after
-            -- it come down and no more. A full clone, such as Sarcina's own, has the history and keeps it whole.
-            git(dir, { 'rev-parse', '--is-shallow-repository' }, function(_, shallow)
-                local fetch = { 'fetch', 'origin', target.ref }
-                if shallow == 'true' then
-                    local since = os.date('!%Y-%m-%dT%H:%M:%SZ', tonumber(time) - 86400)
-                    table.insert(fetch, 2, '--shallow-since=' .. since)
-                end
-                git(dir, fetch, function(fetched)
-                    if not fetched then return cb(info) end
-                    commits_ahead(dir, function(list)
-                        info.commits = list
-                        cb(info)
-                    end)
-                end, true)
-            end)
+            cb({ from = head, to = goal, ref = target.ref, time = tonumber(time) })
+        end)
+    end)
+end
+
+--- The commits between the two ends of what look_ahead found for the plugin in `dir`, newest first, as
+--- { sha, subject, breaking }: cb(list), or cb(nil) when they could not be fetched, and for a commit pin. Only the
+--- commits after the one the plugin is at come down, and the plugin does not move.
+function M.read_ahead(dir, info, cb)
+    if not info.ref then
+        return vim.schedule(function() cb(nil) end)
+    end
+    -- A shallow clone fetches from a day before the plugin's commit, so that commit and everything after it come
+    -- down and no more. A full clone, such as Sarcina's own, has the history and keeps it whole.
+    exclusive(dir, function(release)
+        git(dir, { 'rev-parse', '--is-shallow-repository' }, function(_, shallow)
+            local fetch = { 'fetch', 'origin', info.ref }
+            if shallow == 'true' then
+                local since = os.date('!%Y-%m-%dT%H:%M:%SZ', info.time - 86400)
+                table.insert(fetch, 2, '--shallow-since=' .. since)
+            end
+            git(dir, fetch, function(fetched)
+                release()
+                if not fetched then return cb(nil) end
+                commits_ahead(dir, info.to, cb)
+            end, true)
         end)
     end)
 end

@@ -49,6 +49,26 @@ local function check(entries)
     return checker.state()
 end
 
+-- What the check found for `name`, with its commits read the way the window reads them when it shows the plugin.
+local function read(name)
+    checker.read(name)
+    h.ok(
+        vim.wait(10000, function() return checker.update_of(name).read end, 20),
+        'the commits were never read'
+    )
+    return checker.update_of(name)
+end
+
+-- The window after the commits of `name` are in: showing it in the details is what reads them.
+local function shown(name)
+    ui._flush()
+    h.ok(
+        vim.wait(10000, function() return checker.update_of(name).read end, 20),
+        'the commits were never read'
+    )
+    ui._flush()
+end
+
 -- A plugin one commit behind, after a commit of its own that breaks something.
 local function behind_by_three(name)
     local remote = h.upstream()
@@ -69,13 +89,17 @@ end
 local function shows_update() return details_text():find('\nupdate%s+%x+ ·') ~= nil end
 
 test(
-    'a plugin that is behind is found with the commits in between, newest first, and which of them break',
+    'a plugin that is behind is found, and reading it gives the commits in between, newest first, and which break',
     function()
         local remote, dir = behind_by_three('behind.nvim')
         local before = h.head(dir)
         local state = check({ entry('behind.nvim', remote) })
         local info = state.updates['behind.nvim']
         h.eq({ info.from, info.to }, { before, h.head(remote) })
+        -- The check only asked the remote where the plugin should be; the commits come down when read.
+        h.eq(info.commits, nil)
+        h.eq(h.git(dir, 'rev-list', '--count', 'HEAD'), '1')
+        info = read('behind.nvim')
         h.eq(vim.tbl_map(function(c) return { c.subject, c.breaking } end, info.commits), {
             { 'feat: two', true },
             { 'feat(jinja)!: update parser and queries', true },
@@ -111,7 +135,7 @@ test('a pinned plugin is checked against its pin, not the tip of its branch', fu
     h.git(remote, 'tag', 'v1.1.0')
     local info = check({ entry('pinned.nvim', remote, { tag = 'v1.1.0' }) }).updates['pinned.nvim']
     h.eq(info.to, h.head(remote))
-    h.eq(#info.commits, 1)
+    h.eq(#read('pinned.nvim').commits, 1)
 end)
 
 test('a remote that cannot be reached is named as failed, and the others are still checked', function()
@@ -177,7 +201,7 @@ test('a check adds no line to the list, and the plugin with an update shows it i
     checker.run()
     ui._flush()
     finished()
-    ui._flush()
+    shown('upd.nvim')
     -- The list is the rows of the plugins between its two blank lines: no heading, no row for the update.
     local lines = buffer_lines()
     h.eq(#lines, 4)
@@ -207,13 +231,47 @@ test('after a check the row of a plugin that is behind says so, and the other ro
     local before = buffer_lines()[window.line('news.nvim')]
     h.ok(not before:find('↑', 1, true), before)
     check()
-    ui._flush()
+    shown('news.nvim')
     local row = buffer_lines()[window.line('news.nvim')]
     h.ok(row:find('↑ ' .. h.head(remote):sub(1, 7) .. ' · 3 commits behind  △ 2 breaking', 1, true), row)
     h.eq(buffer_lines()[window.line('other')], others)
     local stats_row = require('sarcina.stats').plugin('news.nvim')
     h.eq({ stats_row.update.to, stats_row.changed }, { h.head(remote), nil })
     window.rounded = true
+end)
+
+test('only the plugin the details show has its commits read, and another is read when it is shown', function()
+    local first = behind_by_three('first.nvim')
+    local second = behind_by_three('second.nvim')
+    h.register({ spec('first.nvim', first), spec('second.nvim', second) })
+    window.rounded = false
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    h.eq(window.selected(), 'first.nvim')
+    check()
+    shown('first.nvim')
+    h.eq(checker.update_of('second.nvim').commits, nil)
+    local row = buffer_lines()[window.line('second.nvim')]
+    h.ok(row:find('↑ %x+ · update available'), row)
+    vim.api.nvim_win_set_cursor(ui._winid, { window.line('second.nvim'), 0 })
+    vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+    h.ok(details_text():find('update%s+%x+ · reading commits…'), details_text())
+    shown('second.nvim')
+    row = buffer_lines()[window.line('second.nvim')]
+    h.ok(row:find('· 3 commits behind  △ 2 breaking', 1, true), row)
+    window.rounded = true
+end)
+
+test('an update that starts while the commits of a plugin are read waits for them, then moves it', function()
+    local remote, dir = behind_by_three('race.nvim')
+    local resolved = { { name = 'race.nvim', timing = 'later', spec = spec('race.nvim', remote) } }
+    h.register({ resolved[1].spec })
+    check({ entry('race.nvim', remote) })
+    checker.read('race.nvim')
+    h.eq(checker.update_of('race.nvim').reading, true)
+    updater.update(resolved, {})
+    h.ok(tasks.wait(15000), 'the update did not finish')
+    h.eq(h.head(dir), h.head(remote))
 end)
 
 test('an update with nothing to do leaves the row exactly as it was', function()
@@ -302,7 +360,7 @@ test('enter shows the changelog of an update in the details, and enter again sho
     vim.o.columns, vim.o.lines = 200, 50
     ui.open()
     check()
-    ui._flush()
+    shown('log.nvim')
     vim.api.nvim_set_current_win(ui._winid)
     vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
     vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
@@ -419,7 +477,9 @@ test(
         end
         details_of('moved.nvim')
         h.eq(shows_update(), false)
-        h.ok(details_of('kept.nvim'):find('update%s+%x+ · 3 commits behind'), details_text())
+        details_of('kept.nvim')
+        shown('kept.nvim')
+        h.ok(details_text():find('update%s+%x+ · 3 commits behind'), details_text())
     end
 )
 

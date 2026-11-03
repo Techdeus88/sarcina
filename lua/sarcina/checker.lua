@@ -1,8 +1,9 @@
 -- sarcina/checker.lua
 -- Looks for updates in the background, for the details of the window: for each installed plugin it
--- asks the remote where the plugin should be, and for the ones that are behind it fetches the commits in
--- between (see executors.look_ahead). It runs outside the task engine, so the rows of the window keep their
--- state, and it never moves a plugin; `:Sarcina update` does that.
+-- asks the remote where the plugin should be (see executors.look_ahead). The commits in between are fetched
+-- later, one plugin at a time, when the window shows it (see M.read), so a check costs one round trip a
+-- plugin. It runs outside the task engine, so the rows of the window keep their state, and it never moves a
+-- plugin; `:Sarcina update` does that.
 
 local executors = require('sarcina.executors')
 local paths = require('sarcina.paths')
@@ -15,7 +16,8 @@ M.max_concurrent = 8
 -- An open of the window this soon (ms) after a check finished shows that check instead of starting another.
 M.fresh_for = 5 * 60 * 1000
 
--- `updates` maps a plugin name to what look_ahead said about it: `{ from, to, commits }`. `looking` holds the
+-- `updates` maps a plugin name to what look_ahead said about it: `{ from, to }`, and `commits` once M.read
+-- fetched them, with `reading` true while it does, and the `dir` they are fetched into. `looking` holds the
 -- names whose remote is being asked right now, so their rows can say so.
 local function blank()
     return {
@@ -110,6 +112,7 @@ function M.run(entries, on_done, opts)
             current.looking[entry.name] = nil
             current.checked = current.checked + 1
             if info then
+                info.dir = dir
                 current.updates[entry.name] = info
             elseif info == false then
                 current.failed[entry.name] = why
@@ -136,6 +139,18 @@ function M.run(entries, on_done, opts)
     else
         pump()
     end
+end
+
+--- Fetches the commits of the update the last check found for `name` (see executors.read_ahead), once, and emits
+--- `updates` when they are in. Does nothing when there is no update, or its commits were read or asked for.
+function M.read(name)
+    local info = state.updates[name]
+    if not info or info.commits or info.reading or info.read then return end
+    info.reading = true
+    executors.read_ahead(info.dir, info, function(commits)
+        info.reading, info.read, info.commits = nil, true, commits
+        ui.emit('updates', state)
+    end)
 end
 
 --- `name` was updated: it has no update any more, and the window lists it in its section only.

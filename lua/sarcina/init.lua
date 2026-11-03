@@ -30,11 +30,12 @@ function M.get(name)
 end
 
 -- A directory on disk that no spec owns is a plugin the user took out of their specs, or switched off, and forgot to
--- delete. It says so in the header; an empty manifest says nothing, since a spec file that failed to load would
--- make every directory look forgotten.
+-- delete. It says so in the header and lists as a disabled row; an empty manifest says nothing, since a spec file
+-- that failed to load would make every directory look forgotten.
 function M._warn_stale(resolved)
-    if #resolved == 0 then return end
+    if #resolved == 0 then return stats.disable({}) end
     local stale = require('sarcina.installer').stale(resolved)
+    stats.disable(stale)
     if #stale == 0 then return end
     ui.emit(
         'warn',

@@ -25,6 +25,7 @@ local GLYPH = {
     loaded = '✔',
     blocked = '⊘',
     failed = '✘',
+    disabled = '−',
 }
 local HL = {
     pending = 'SarcinaPending',
@@ -37,6 +38,7 @@ local HL = {
     loaded = 'SarcinaDone',
     blocked = 'SarcinaSkipped',
     failed = 'SarcinaFailed',
+    disabled = 'SarcinaSkipped',
 }
 local STEP_GLYPH = { pending = '…', running = '▶', done = '✔', failed = '✘', skipped = '⊘' }
 local STEP_HL = {
@@ -329,8 +331,9 @@ local function breaking_count(commits)
 end
 
 -- What an update says after the commit it goes to: how far behind the plugin is and how many of those commits
--- break something.
+-- break something. The commits are read when the details first show the plugin (see checker.read).
 local function behind(info)
+    if info.reading then return { { ' · reading commits…' } } end
     if not info.commits then return { { ' · update available' } } end
     if #info.commits == 0 then return { { ' · moves back' } } end
     local parts = { { ' · ' .. plural(#info.commits, 'commit') .. ' behind' } }
@@ -394,14 +397,17 @@ end
 
 -- A row: `name (load time) when it loads <done>/<all> tasks pill status message`, one space apart. The status
 -- message takes what is left of the list, so git's progress and a build's output show while they run. Without
--- room for a few characters of it the message goes, and only then is the name cut.
+-- room for a few characters of it the message goes, and only then is the name cut. A disabled row has no tasks,
+-- so no pill.
 local function row_line(row)
     local time = format_time(row.duration)
     local after = {}
     if time ~= '' then vim.list_extend(after, { { ' ' }, { '(' .. time .. ')', 'SarcinaNote' } }) end
     if row.timing then vim.list_extend(after, { { ' ' }, { row.timing, 'SarcinaTag' } }) end
-    table.insert(after, { ' ' })
-    vim.list_extend(after, pill_parts(row.task, row.tasks, row.state))
+    if row.state ~= 'disabled' then
+        table.insert(after, { ' ' })
+        vim.list_extend(after, pill_parts(row.task, row.tasks, row.state))
+    end
     local lead = lead_parts(row.name)
     local name = fit(row.name, math.max(view.list_w - parts_width(lead) - parts_width(after), NAME_MIN))
     local parts = lead
@@ -416,20 +422,22 @@ local function row_line(row)
 end
 
 -- The rows of `list` in the order the list shows them: the plugins that load now, then the ones that load
--- later, then the ones a trigger loads, each timing in the order of `list`. A row with no known timing is later.
+-- later, then the ones a trigger loads, each timing in the order of `list`, and the disabled ones at the bottom.
+-- Any other row with no known timing is later.
 local function ordered(list)
     local by_timing = {}
     for _, timing in ipairs(TIMING_ORDER) do
         by_timing[timing] = {}
     end
+    local disabled = {}
     for _, row in ipairs(list) do
-        table.insert(by_timing[row.timing] or by_timing.later, row)
+        table.insert(row.state == 'disabled' and disabled or by_timing[row.timing] or by_timing.later, row)
     end
     local sorted = {}
     for _, timing in ipairs(TIMING_ORDER) do
         vim.list_extend(sorted, by_timing[timing])
     end
-    return sorted
+    return vim.list_extend(sorted, disabled)
 end
 
 -- The names of `list` in the order the list shows them.
@@ -629,20 +637,24 @@ end
 -- The name in the middle of the first line of the header.
 local BRAND = { { 'Sarcina', 'SarcinaBrand' } }
 
+-- The counts are of the plugins in your specs, so a disabled row adds to none of them.
 local function header_lines()
-    local text = ' Total: ' .. plural(#names, 'plugin')
-    local task, tasks, loaded = 0, 0, 0
+    local task, tasks, loaded, total = 0, 0, 0, 0
     for _, name in ipairs(names) do
-        task, tasks = task + rows[name].task, tasks + rows[name].tasks
-        if rows[name].state == 'loaded' then loaded = loaded + 1 end
+        if rows[name].state ~= 'disabled' then
+            total = total + 1
+            task, tasks = task + rows[name].task, tasks + rows[name].tasks
+            if rows[name].state == 'loaded' then loaded = loaded + 1 end
+        end
     end
+    local text = ' Total: ' .. plural(total, 'plugin')
     local counts = {
         { ' ' },
         { '●', 'SarcinaDone' },
         { ' ' .. loaded, 'SarcinaStepTime' },
         { '  ' },
         { '○', 'SarcinaPending' },
-        { ' ' .. (#names - loaded), 'SarcinaStepTime' },
+        { ' ' .. (total - loaded), 'SarcinaStepTime' },
     }
     vim.list_extend(counts, totals_parts())
     local progress =
@@ -1003,11 +1015,16 @@ function M.draw_details(buf)
             table.insert(lines, build_line({ { pad(key, KEY_W + 1), 'SarcinaTag' }, { value, group } }))
         end
         local triggered = type(spec.triggers) == 'table'
+        local disabled = row.state == 'disabled'
         add('state', GLYPH[row.state] .. ' ' .. row.state, HL[row.state])
-        local widget = { { pad('tasks', KEY_W + 1), 'SarcinaTag' } }
-        vim.list_extend(widget, pill_parts(row.task, row.tasks, row.state))
-        if row.duration then table.insert(widget, { ' ' .. format_time(row.duration), 'SarcinaStepTime' }) end
-        table.insert(lines, build_line(widget))
+        if not disabled then
+            local widget = { { pad('tasks', KEY_W + 1), 'SarcinaTag' } }
+            vim.list_extend(widget, pill_parts(row.task, row.tasks, row.state))
+            if row.duration then
+                table.insert(widget, { ' ' .. format_time(row.duration), 'SarcinaStepTime' })
+            end
+            table.insert(lines, build_line(widget))
+        end
         add('timing', row.timing)
         add('src', spec.repo and require('sarcina.executors').clone_url(spec.repo) or nil)
         local pin = require('sarcina.pin').of(spec)
@@ -1016,6 +1033,7 @@ function M.draw_details(buf)
         add('rev', rev_of(selected, dir))
         local info = checker().update_of(selected)
         if info then
+            checker().read(selected)
             local parts = { { pad('update', KEY_W + 1), 'SarcinaTag' }, { short(info.to), 'SarcinaRev' } }
             table.insert(lines, build_line(vim.list_extend(parts, behind(info))))
         end
@@ -1028,10 +1046,11 @@ function M.draw_details(buf)
             (row.detail or ''):gsub('%s+', ' '),
             row.state == 'failed' and 'SarcinaFailed' or 'SarcinaNote'
         )
-        table.insert(lines, build_line({}))
         if M.changelog and info and info.commits then
+            table.insert(lines, build_line({}))
             vim.list_extend(lines, changelog_lines(info.commits))
-        else
+        elseif not disabled then
+            table.insert(lines, build_line({}))
             vim.list_extend(lines, task_lines(selected))
         end
     end

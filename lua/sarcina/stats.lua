@@ -12,6 +12,7 @@ local M = {}
 local origin = vim.uv.hrtime() -- when setup() began
 local registered = {} -- plugin name -> { timing = 'now' | 'later' | 'trigger', plan = task ids, spec }
 local order = {} -- plugin names in load order
+local disabled = {} -- the plugin directories on disk that no spec owns, by name
 
 local CLASS = { now = 'now', later = 'later', trigger = 'triggered' }
 
@@ -37,6 +38,19 @@ function M.register(resolved)
         table.insert(order, entry.name)
         registered[entry.name] = { timing = entry.timing, plan = plan_of(entry.spec), spec = entry.spec }
     end
+end
+
+--- The plugin directories on disk that no spec owns (see installer.stale). Each is a `disabled` row after the
+--- others until it is deleted or a spec owns it again; they count in none of the numbers.
+function M.disable(names) disabled = vim.list_extend({}, names) end
+
+-- The disabled names that no registered plugin has taken back.
+local function disabled_names()
+    return vim.tbl_filter(function(name) return not registered[name] end, disabled)
+end
+
+local function disabled_row(name)
+    return { name = name, state = 'disabled', task = 0, tasks = 0, detail = 'not in your specs' }
 end
 
 --- Every task of the session: start, end and duration in ms since setup() began, plus its metadata.
@@ -207,13 +221,15 @@ end
 
 --- One row for a registered plugin, or nil: `name`, `timing`, `state`, `task` of `tasks` (the plugin is at
 --- task 3 of 8), `detail` and `duration` in ms. `state` is pending, installing, building, updating, checking,
---- loading, waiting (for its trigger), loaded, blocked or failed. A plugin whose remote a look for updates is
+--- loading, waiting (for its trigger), loaded, blocked, failed, or disabled for a directory no spec owns (see
+--- `disable`), which has no timing and no tasks. A plugin whose remote a look for updates is
 --- asking is `checking` unless it is at work. An install of what is on disk and a build whose commit
 --- did not change never show as work. A plugin that is not at work also carries what its latest check and
 --- update left: `update`, the commits a check found it is behind (`{ from, to, commits }`, see checker.lua),
 --- and `changed`, what an update did to it (`updated abc1234 → def5678`, or `update skipped: local changes`).
 function M.plugin(name)
     if registered[name] then return row_of(name) end
+    if vim.tbl_contains(disabled_names(), name) then return disabled_row(name) end
 end
 
 --- The tasks of a plugin's plan in order, or nil for a plugin that is not registered: `id`, `status`,
@@ -279,8 +295,10 @@ local function load_order()
 end
 
 --- `plugin` for every registered plugin, in the order they loaded. A plugin that has not loaded yet comes
---- after the ones that have, so a row moves up when its plugin loads.
-function M.plugins() return vim.tbl_map(row_of, load_order()) end
+--- after the ones that have, so a row moves up when its plugin loads. The disabled ones come last.
+function M.plugins()
+    return vim.list_extend(vim.tbl_map(row_of, load_order()), vim.tbl_map(disabled_row, disabled_names()))
+end
 
 --- Drop the plugins `names` from the session: they stop being rows and stop counting.
 function M.forget(names)
@@ -289,12 +307,13 @@ function M.forget(names)
         gone[name], registered[name] = true, nil
     end
     order = vim.tbl_filter(function(name) return not gone[name] end, order)
+    disabled = vim.tbl_filter(function(name) return not gone[name] end, disabled)
 end
 
 --- Forget the origin and the registered plugins. For tests.
 function M._reset()
     origin = vim.uv.hrtime()
-    registered, order = {}, {}
+    registered, order, disabled = {}, {}, {}
 end
 
 return M

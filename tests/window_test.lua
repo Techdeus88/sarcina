@@ -1534,4 +1534,31 @@ test('a long list scrolled away and back shows its blank line at the top, and at
     end)
 end)
 
+test('a plugin on disk that no spec owns is listed last as disabled, with no tasks, and goes when deleted', function()
+    local plugins = { loaded('a'), vim.tbl_extend('force', loaded('b'), { timing = 'now' }) }
+    h.register(plugins)
+    h.run(plugins)
+    vim.fn.mkdir(paths.install('gone'), 'p')
+    require('sarcina.stats').disable({ 'gone' })
+    with_size(200, 50, function()
+        ui.open()
+        local got = lines()
+        h.eq(#got, 3)
+        h.ok(got[1]:find('^   b%s'), got[1])
+        h.eq(vim.trim(got[3]), 'gone disabled · not in your specs')
+        -- The header counts the plugins of your specs only.
+        h.ok(header_text():find('Total: 2 plugins', 1, true), header_text())
+        h.ok(header_all()[2]:find('^ ● 2  ○ 0'), header_all()[2])
+        vim.api.nvim_win_set_cursor(ui._winid, { window.line('gone'), 0 })
+        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+        local text = details_text()
+        h.ok(text:find('state%s+− disabled'), text)
+        h.ok(text:find('detail%s+not in your specs'), text)
+        h.ok(not text:find('Tasks', 1, true), text)
+        h.ok(not text:find('\ntasks%s'), text)
+        require('sarcina.installer').remove({ 'gone' })
+        h.ok(vim.wait(500, function() return #lines() == 2 end), vim.inspect(lines()))
+    end)
+end)
+
 return tests

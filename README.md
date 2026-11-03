@@ -531,7 +531,7 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 
 ### Updates
 
-When the window opens it looks for updates in the background (see `check` under [Commands](#commands)). The list has no section for them. The row of a plugin that is behind says so after its tasks widget, and its details give the same on the `update` line: the commit it would move to, how many commits it is behind, and how many of them break something:
+When the window opens it looks for updates in the background (see `check` under [Commands](#commands)). The list has no section for them. The row of a plugin that is behind says so after its tasks widget, and its details give the same on the `update` line: the commit it would move to, how many commits it is behind, and how many of them break something. A check only asks each remote where its plugin should be, one round trip a plugin; the commits in between come down the first time the details show that plugin, so until then its row says `update available`, and while they come down `reading commits…`:
 
 ```
 telescope.nvim (2.1s) later  8/8  tasks ✔  ↑ 0195cd6 · 1 commit behind  △ 1 breaking

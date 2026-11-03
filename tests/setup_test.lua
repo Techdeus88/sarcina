@@ -87,6 +87,7 @@ test('setup warns about a plugin on disk that no spec owns, and about nothing el
     h.ok(tasks.wait(2000))
     h.ok(h.notified('1 plugin on disk, not in your specs: forgotten.nvim'), vim.inspect(h.notes))
     h.eq(h.stray, {})
+    h.eq(require('sarcina.stats').plugin('forgotten.nvim').state, 'disabled')
     vim.fn.delete(paths.install('forgotten.nvim'), 'rf')
     h.notes = {}
     h.reset()
@@ -94,6 +95,7 @@ test('setup warns about a plugin on disk that no spec owns, and about nothing el
     h.ok(tasks.wait(2000))
     vim.fn.delete(file)
     h.ok(not h.notified('on disk, not in your specs'), vim.inspect(h.notes))
+    h.eq(require('sarcina.stats').plugin('forgotten.nvim'), nil)
 end)
 
 return tests
