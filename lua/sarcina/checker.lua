@@ -15,14 +15,26 @@ M.max_concurrent = 8
 -- An open of the window this soon (ms) after a check finished shows that check instead of starting another.
 M.fresh_for = 5 * 60 * 1000
 
--- `updates` maps a plugin name to what look_ahead said about it: `{ from, to, commits }`.
-local state =
-    { running = false, checked = 0, total = 0, own = false, updates = {}, failed = {}, finished = nil }
+-- `updates` maps a plugin name to what look_ahead said about it: `{ from, to, commits }`. `looking` holds the
+-- names whose remote is being asked right now, so their rows can say so.
+local function blank()
+    return {
+        running = false,
+        checked = 0,
+        total = 0,
+        own = false,
+        updates = {},
+        failed = {},
+        looking = {},
+        finished = nil,
+    }
+end
+local state = blank()
 local last_full -- when a check of every plugin last finished, from vim.uv.now()
 
 --- Whether a check is running, how far it got (`checked` of `total`), what it found so far (`updates`, by
 --- plugin name), the plugins whose remote could not say (`failed`, name -> why), and when it last finished
---- (`finished`, from vim.uv.now()). `own` is whether Sarcina is one of the `total`, checked first. Read it, do not
+--- (`finished`, from vim.uv.now()), and the plugins being looked at now (`looking`, name -> true). `own` is whether Sarcina is one of the `total`, checked first. Read it, do not
 --- change it.
 function M.state() return state end
 
@@ -77,6 +89,7 @@ function M.run(entries, on_done, opts)
         own = first and true or false,
         updates = updates,
         failed = failed,
+        looking = {},
         finished = nil,
     }
     local current = state
@@ -92,7 +105,9 @@ function M.run(entries, on_done, opts)
     -- Looks at one entry, then calls `after`.
     local function look(entry, after)
         local dir = entry.dir or paths.install(entry.name)
+        current.looking[entry.name] = true
         executors.look_ahead(dir, pins.of(entry.spec), function(info, why)
+            current.looking[entry.name] = nil
             current.checked = current.checked + 1
             if info then
                 current.updates[entry.name] = info
@@ -132,8 +147,7 @@ end
 
 --- Forget what was found. For tests.
 function M._reset()
-    state =
-        { running = false, checked = 0, total = 0, own = false, updates = {}, failed = {}, finished = nil }
+    state = blank()
     last_full = nil
 end
 

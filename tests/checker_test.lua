@@ -206,6 +206,26 @@ test('while a check runs the list title says checking, and then the list starts 
     window.rounded = true
 end)
 
+test(
+    'while its remote is asked a plugin row says checking, and after the check it is back as it was',
+    function()
+        local remote = behind_by_three('row.nvim')
+        h.register({ spec('row.nvim', remote) })
+        local stats = require('sarcina.stats')
+        local before = stats.plugin('row.nvim').state
+        ui.open()
+        checker.run()
+        h.eq(checker.state().looking['row.nvim'], true)
+        h.eq(stats.plugin('row.nvim').state, 'checking')
+        ui._flush()
+        local line = buffer_lines()[window.line('row.nvim')]
+        h.ok(line:find('▶  checking for updates…', 1, true), line)
+        finished()
+        h.eq(checker.state().looking, {})
+        h.eq(stats.plugin('row.nvim').state, before)
+    end
+)
+
 test('a check that found nothing says up to date, and with nothing to check the list has no title', function()
     local remote = h.upstream()
     installed('fresh.nvim', remote)

@@ -152,13 +152,11 @@ local function hint()
     return text
 end
 
--- Draws the details of the selected plugin and names the details window after it. A different plugin
--- starts at the top of the window.
+-- Draws the details of the selected plugin. A different plugin starts at the top of the window.
 local function show_details()
     if not pane_valid('detail') then return end
     local win = pane_win('detail')
     local name = window().draw_details(pane_buf('detail'))
-    vim.api.nvim_win_set_config(win, { title = name and ' ' .. name .. ' ' or '', title_pos = 'left' })
     if name ~= shown then
         shown = name
         vim.api.nvim_win_call(win, function() vim.fn.winrestview({ topline = 1, lnum = 1, leftcol = 0 }) end)

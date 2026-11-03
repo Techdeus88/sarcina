@@ -115,6 +115,8 @@ local function first_line(text)
 end
 
 local WORKING = { install = 'installing', build = 'building', update = 'updating', check = 'checking' }
+-- The states of a plugin at work, which a look for updates does not cover up.
+local ACTIVE = { installing = true, building = true, updating = true, checking = true, loading = true }
 
 -- install, build, update and check count as work only once they really started, since a clone of what is on
 -- disk and a build whose commit did not change finish at once.
@@ -147,11 +149,23 @@ local function state_of(latest, jobs)
     return 'pending'
 end
 
+-- Whether a check for updates (see checker.lua) is asking the plugin's remote now. The checker runs outside
+-- the task engine, so without this its rows would sit still while it works.
+local function being_checked(name)
+    local checker = package.loaded['sarcina.checker']
+    return checker ~= nil and checker.state().looking[name] == true
+end
+
 local function row_of(name)
     local entry = registered[name]
     local jobs = track.jobs_of(name)
     local row = { name = name, timing = entry.timing, state = 'pending', task = 0, tasks = #entry.plan }
-    if #jobs == 0 then return row end
+    if #jobs == 0 then
+        if being_checked(name) then
+            row.state, row.detail = 'checking', 'checking for updates…'
+        end
+        return row
+    end
     local latest, duration = {}, 0
     for _, job in ipairs(jobs) do
         latest[job.id] = job
@@ -162,12 +176,16 @@ local function row_of(name)
     row.state, row.detail = state_of(latest, jobs)
     row.task = row.state == 'loaded' and row.tasks or position(steps_of(entry.plan, latest))
     row.duration = duration > 0 and duration or nil
+    if being_checked(name) and not ACTIVE[row.state] then
+        row.state, row.detail = 'checking', 'checking for updates…'
+    end
     return row
 end
 
 --- One row for a registered plugin, or nil: `name`, `timing`, `state`, `task` of `tasks` (the plugin is at
---- task 3 of 8), `detail` and `duration` in ms. `state` is pending, installing, building, loading, waiting
---- (for its trigger), loaded, blocked or failed. An install of what is on disk and a build whose commit
+--- task 3 of 8), `detail` and `duration` in ms. `state` is pending, installing, building, updating, checking,
+--- loading, waiting (for its trigger), loaded, blocked or failed. A plugin whose remote a look for updates is
+--- asking is `checking` unless it is at work. An install of what is on disk and a build whose commit
 --- did not change never show as work.
 function M.plugin(name)
     if registered[name] then return row_of(name) end

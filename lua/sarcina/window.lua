@@ -369,14 +369,14 @@ local function section_line(title, count, extra)
     return build_line(vim.list_extend(parts, extra or {}))
 end
 
--- The title of the list window while a check runs or after one that had something to check, on the top border
--- level with the name of the plugin over the details: `Updates (N)`, then that a check runs, that nothing was
--- found, how many remotes could not say, and the key for the changelog. '' for no title.
+-- The heading of the Updates section while a check runs or after one that had something to check, the first
+-- line of the list level with the name of the plugin over the details: `Updates (N)`, then that a check runs,
+-- that nothing was found, how many remotes could not say, and the key for the changelog. nil for no heading.
 local function updates_title()
     local check = checker().state()
-    if not (check.running or check.total > 0) then return '' end
+    if not (check.running or check.total > 0) then return nil end
     local found = vim.tbl_count(check.updates)
-    local parts = { { string.format(' Updates (%d) ', found), 'SarcinaSection' } }
+    local parts = { { ' ' }, { string.format('Updates (%d) ', found), 'SarcinaSection' } }
     if check.running then
         table.insert(parts, { '↻ checking… ', 'SarcinaNote' })
     elseif found == 0 then
@@ -441,7 +441,7 @@ local function shown_order(list)
     return order
 end
 
--- The lines of the list: the updates a check found, under the Updates title of the window, then a section per
+-- The lines of the list: the updates a check found, under the Updates heading, then a section per
 -- timing. Sections are a blank line apart. Fills `entries`, `line_of`, `rows` and `names`.
 local function layout(list)
     local lines = {}
@@ -452,6 +452,8 @@ local function layout(list)
     -- A blank line above the content and one below it, so it does not touch the borders.
     add(build_line({}), { kind = 'blank' })
     local check = checker().state()
+    local title = updates_title()
+    if title then add(build_line(title), { kind = 'section' }) end
     local found = {}
     for _, row in ipairs(list) do
         if check.updates[row.name] then table.insert(found, row.name) end
@@ -841,8 +843,6 @@ function M.config()
             col = col,
             width = view.list_w,
             height = view.middle,
-            title = updates_title(),
-            title_pos = 'left',
         },
         footer = {
             relative = 'editor',
@@ -1095,7 +1095,9 @@ function M.draw_details(buf)
     local own = not row and selected == require('sarcina.self').name and checker().update_of(selected)
     if own then lines = own_lines(own) end
     if #lines > 0 then
-        -- A blank line above the details and one below them, as in the list.
+        -- A blank line above the name of the plugin, one under it, and one below the details, as in the list.
+        table.insert(lines, 1, build_line({}))
+        table.insert(lines, 1, build_line({ { selected, 'SarcinaSection' } }))
         table.insert(lines, 1, build_line({}))
         table.insert(lines, build_line({}))
     end
