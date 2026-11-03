@@ -311,13 +311,47 @@ end
 -- The list moves up and down and nowhere else: no key takes the cursor sideways or scrolls the view sideways, and
 -- no key that edits can reach the buffer or put an error in the command line.
 local SIDEWAYS = {
-    'h', '<Left>', '<Right>', '0', '^', '$', '<Home>', '<End>', 'w', 'W', 'b', 'B', 'e', 'E', 'ge', 'gE', ';',
-    ',', '|', 'zh', 'zl', 'zH', 'zL', 'zs', 'ze', '<S-Left>', '<S-Right>', '<C-Left>', '<C-Right>', 'g0',
-    'g^', 'g$', 'gm', 'gM', '<ScrollWheelLeft>', '<ScrollWheelRight>',
+    'h',
+    '<Left>',
+    '<Right>',
+    '0',
+    '^',
+    '$',
+    '<Home>',
+    '<End>',
+    'w',
+    'W',
+    'b',
+    'B',
+    'e',
+    'E',
+    'ge',
+    'gE',
+    ';',
+    ',',
+    '|',
+    'zh',
+    'zl',
+    'zH',
+    'zL',
+    'zs',
+    'ze',
+    '<S-Left>',
+    '<S-Right>',
+    '<C-Left>',
+    '<C-Right>',
+    'g0',
+    'g^',
+    'g$',
+    'gm',
+    'gM',
+    '<ScrollWheelLeft>',
+    '<ScrollWheelRight>',
 }
 -- These wait for a character, which has to go too or it would run as a key of its own.
 local SIDEWAYS_WITH_CHAR = { 'f', 'F', 't', 'T' }
-local EDITING = { 'a', 'A', 'o', 'O', 'I', 'x', 'X', 'p', 'P', 's', 'S', 'r', 'R', 'J', 'gJ', '~', '.', '<C-r>', 'D' }
+local EDITING =
+    { 'a', 'A', 'o', 'O', 'I', 'x', 'X', 'p', 'P', 's', 'S', 'r', 'R', 'J', 'gJ', '~', '.', '<C-r>', 'D' }
 
 local function lock_list(buf)
     local function map(modes, key, rhs)
