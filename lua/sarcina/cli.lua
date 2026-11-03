@@ -73,11 +73,49 @@ function subcommands.install(_, args)
     end
 end
 
+-- Why none of `names` loaded: the ones that already have, and the ones that are not on disk.
+local function nothing_to_load(names)
+    local stats = require('sarcina.stats')
+    local loaded, missing = {}, {}
+    for _, name in ipairs(names) do
+        local row = stats.plugin(name)
+        if row and row.state == 'loaded' then
+            table.insert(loaded, name)
+        elseif not vim.uv.fs_stat(paths.install(name)) then
+            table.insert(missing, name)
+        end
+    end
+    local parts = {}
+    if #loaded > 0 then table.insert(parts, 'Already loaded: ' .. table.concat(loaded, ', ') .. '.') end
+    if #missing > 0 then
+        table.insert(parts, 'Not installed: ' .. table.concat(missing, ', ') .. '. Run :Sarcina install.')
+    end
+    return #parts > 0 and table.concat(parts, ' ') or 'Nothing to load'
+end
+
 -- Loads the plugins on disk that have not loaded in this session, those in `names` or all of them. Nothing is
--- cloned.
+-- cloned. A plugin you name that waits for its trigger loads now, as if the trigger had fired; without names, lazy
+-- plugins stay lazy.
 function subcommands.load(_, args)
-    if not run_pending(resolve_manifest(), vim.list_slice(args.fargs, 2), 'load') then
-        ui.emit('info', 'Nothing to load')
+    local names = vim.list_slice(args.fargs, 2)
+    local scheduler = require('sarcina.scheduler')
+    local woken = vim.tbl_filter(function(name) return scheduler.state(name) == 'waiting' end, names)
+    if #woken > 0 then
+        ui.emit(
+            'info',
+            string.format(
+                'Loading %s before %s: %s',
+                ui.plural(#woken, 'plugin'),
+                #woken == 1 and 'its trigger' or 'their triggers',
+                table.concat(woken, ', ')
+            )
+        )
+        for _, name in ipairs(woken) do
+            scheduler.load(name)
+        end
+    end
+    if not run_pending(resolve_manifest(), names, 'load') and #woken == 0 then
+        ui.emit('info', nothing_to_load(names))
     end
 end
 

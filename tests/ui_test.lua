@@ -305,6 +305,17 @@ test('real work waits for the colorscheme before it opens the window', function(
     h.ok(tasks.wait(2000))
 end)
 
+test('a clone opens the window at once, without waiting for the colorscheme', function()
+    ui.init()
+    vim.g.colors_name = nil
+    local clone = { name = 'c', tasks = { { id = 'install', type = 't_work' } } }
+    h.register({ clone })
+    tasks.enqueue('c', clone)
+    tasks.run_all()
+    h.ok(vim.wait(100, win_open), 'the window waited for a colorscheme during a clone')
+    h.ok(tasks.wait(2000))
+end)
+
 test('with no colorscheme the window opens after theme_wait', function()
     vim.g.colors_name = nil
     ui.theme_wait = 150

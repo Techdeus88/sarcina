@@ -14,7 +14,8 @@ local M = {}
 M.show = 'auto'
 -- Whether opening the window looks for updates (see checker.lua). Off, `C` in the window or :Sarcina check does it.
 M.check_on_open = true
--- How long a window that opens by itself waits for a colorscheme, ms. See `theme_ready`.
+-- How long a window that opens by itself waits for a colorscheme, ms, unless it is a clone that opens it. See
+-- `theme_ready`.
 M.theme_wait = 2000
 -- The black layer behind a window opened by hand: its winblend, 0 solid black to 100 invisible. false: none.
 local DEFAULT_BACKDROP = 50
@@ -40,6 +41,7 @@ M._dirty = {} -- plugin names with an event since the last flush
 M._want = false -- an event since the last flush asked for the window
 M._full = false -- the next flush redraws every line
 M._flush_pending = false
+M._cloning = false -- a clone has started and the window has not opened yet
 M._check_after_run = false -- the window opened during a run, so it checks for updates when the run ends
 M._theme_timer = false -- the wait for a colorscheme has started
 M._theme_waited = false -- the wait for a colorscheme is over, with or without one
@@ -572,10 +574,13 @@ function M._flush()
     end
     if not win_valid() then
         if M.show == 'never' or not (want or unseen) then return end
-        if not unseen and not theme_ready() then
+        -- A run that clones does not wait for the colorscheme: it is among the clones, and the ColorScheme event
+        -- that follows redraws the window in its colours.
+        if not unseen and not M._cloning and not theme_ready() then
             M._want = true
             return
         end
+        M._cloning = false
         return open_window(false)
     end
     local redrawn = full
@@ -605,6 +610,8 @@ function M._on_task(job)
     end
     M._dirty[job.plugin] = true
     if job.working or job.status == 'failed' then M._want = true end
+    -- A clone is under way, so the colorscheme is not here yet and cannot be before the install barrier ends.
+    if job.working and job.id == 'install' then M._cloning = true end
     schedule_flush()
 end
 

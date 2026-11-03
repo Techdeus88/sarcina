@@ -56,6 +56,7 @@ function M.reset()
     ui._dismissed = false
     ui._seen_failed = 0
     ui._dirty, ui._want, ui._full = {}, false, false
+    ui._cloning = false
     ui.show = 'auto'
     -- A test that wants the window to look for updates when it opens says so.
     ui.check_on_open = false
