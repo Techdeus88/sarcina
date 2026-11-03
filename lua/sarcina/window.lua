@@ -397,8 +397,8 @@ end
 
 -- A row: `name (load time) when it loads <done>/<all> tasks pill status message`, one space apart. The status
 -- message takes what is left of the list, so git's progress and a build's output show while they run. Without
--- room for a few characters of it the message goes, and only then is the name cut. A disabled row has no tasks,
--- so no pill.
+-- room for a few characters of it the message goes, and only then is the name cut. A disabled row has no
+-- tasks, so no pill.
 local function row_line(row)
     local time = format_time(row.duration)
     local after = {}
@@ -422,8 +422,8 @@ local function row_line(row)
 end
 
 -- The rows of `list` in the order the list shows them: the plugins that load now, then the ones that load
--- later, then the ones a trigger loads, each timing in the order of `list`, and the disabled ones at the bottom.
--- Any other row with no known timing is later.
+-- later, then the ones a trigger loads, each timing in the order of `list`, and the disabled ones at the
+-- bottom. Any other row with no known timing is later.
 local function ordered(list)
     local by_timing = {}
     for _, timing in ipairs(TIMING_ORDER) do

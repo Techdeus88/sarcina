@@ -493,16 +493,20 @@ test(
     end
 )
 
-test('a directory no spec owns is a disabled row after the others, and counts in none of the numbers', function()
+test('a directory no spec owns is a disabled row after the rest, and counts in no number', function()
     stats.register(resolver.resolve({ { name = 'stkept', repo = 'x/stkept' } }))
     stats.disable({ 'stgone-a', 'stgone-b' })
     h.eq(h.names(stats.plugins()), { 'stkept', 'stgone-a', 'stgone-b' })
     local row = stats.plugin('stgone-a')
-    h.eq({ row.state, row.detail, row.task, row.tasks, row.timing }, { 'disabled', 'not in your specs', 0, 0, nil })
+    h.eq({ row.state, row.detail, row.task, row.tasks }, { 'disabled', 'not in your specs', 0, 0 })
+    h.eq(row.timing, nil)
     h.eq(stats.steps('stgone-a'), nil)
     h.eq(stats.get().count, 1)
     -- A spec that owns it again makes it a plugin like the others; a delete takes the row away.
-    stats.register(resolver.resolve({ { name = 'stkept', repo = 'x/stkept' }, { name = 'stgone-a', repo = 'x/a' } }))
+    stats.register(resolver.resolve({
+        { name = 'stkept', repo = 'x/stkept' },
+        { name = 'stgone-a', repo = 'x/a' },
+    }))
     h.eq(stats.plugin('stgone-a').state, 'pending')
     stats.forget({ 'stgone-b' })
     h.eq(h.names(stats.plugins()), { 'stkept', 'stgone-a' })

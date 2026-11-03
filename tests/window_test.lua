@@ -1534,7 +1534,7 @@ test('a long list scrolled away and back shows its blank line at the top, and at
     end)
 end)
 
-test('a plugin on disk that no spec owns is listed last as disabled, with no tasks, and goes when deleted', function()
+test('a plugin on disk no spec owns is listed last as disabled, and goes when deleted', function()
     local plugins = { loaded('a'), vim.tbl_extend('force', loaded('b'), { timing = 'now' }) }
     h.register(plugins)
     h.run(plugins)
