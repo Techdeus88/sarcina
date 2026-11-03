@@ -50,7 +50,7 @@ test('setup warns about a plugin on disk that no spec owns, and about nothing el
     vim.fn.mkdir(paths.install('forgotten.nvim'), 'p')
     require('sarcina').setup()
     h.ok(tasks.wait(2000))
-    h.ok(h.notified('1 on disk, not in your specs: forgotten.nvim'), vim.inspect(h.notes))
+    h.ok(h.notified('1 plugin on disk, not in your specs: forgotten.nvim'), vim.inspect(h.notes))
     h.eq(h.stray, {})
     vim.fn.delete(paths.install('forgotten.nvim'), 'rf')
     h.notes = {}

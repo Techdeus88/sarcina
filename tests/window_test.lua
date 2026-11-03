@@ -127,7 +127,7 @@ test('a running row shows its work, and the details show its output, until it is
         h.ok(lines()[1]:find('^   slow%s+.*later%s+.*1/2%s+tasks ▶.*installing'), lines()[1])
         -- The right of the header follows the work: what kind, how far, the plugin at it, and a bar.
         h.ok(
-            header_text():find('^ Total: 1 plugin%s+Sarcina%s+⤓ Installing 0/1 · slow  .-   0%% $'),
+            header_text():find('^ Total: 1 plugin%s+Sarcina%s+⤓ Installing 0/1 plugin · slow  .-   0%% $'),
             header_text()
         )
         h.ok(
@@ -144,6 +144,42 @@ test('a running row shows its work, and the details show its output, until it is
         h.ok(header_all()[2]:find('^ ● 1  ○ 0  ⤓ 1'), header_all()[2])
     end)
 end)
+
+test('the work in the header says plugins for more than one, and the end of the run counts tasks', function()
+    local held = { name = 'slow', tasks = { { id = 'install', type = 'w_hold' }, h.lua('rtp', h.noop) } }
+    local quick = { name = 'quick', tasks = { h.lua('install', h.noop), h.lua('rtp', h.noop) } }
+    h.register({ held, quick })
+    tasks.enqueue('quick', quick)
+    tasks.enqueue('slow', held)
+    tasks.run_all()
+    with_size(200, 50, function()
+        h.ok(vim.wait(500, win_open), 'the window never opened')
+        h.ok(
+            vim.wait(500, function() return header_text():find('Installing 1/2', 1, true) end),
+            header_text()
+        )
+        h.ok(header_text():find('⤓ Installing 1/2 plugins · slow', 1, true), header_text())
+        h.ok(header_all()[2]:find('/4 tasks', 1, true), header_all()[2])
+        release()
+        h.ok(tasks.wait(2000))
+    end)
+    h.ok(h.notified('4 tasks done'), vim.inspect(h.notes))
+    h.notes = {}
+    require('sarcina.ui')._messages = h.notes
+    h.run({ { name = 'one', tasks = { h.lua('rtp', h.noop) } } })
+    h.ok(h.notified('1 task done'), vim.inspect(h.notes))
+    h.ok(not h.notified('1 tasks'), vim.inspect(h.notes))
+end)
+
+test(
+    'plural says the word once for one and adds an s for any other count',
+    function()
+        h.eq(
+            { ui.plural(0, 'plugin'), ui.plural(1, 'plugin'), ui.plural(4, 'plugin') },
+            { '0 plugins', '1 plugin', '4 plugins' }
+        )
+    end
+)
 
 test(
     'the header counts the plugins and the footer points at the select view, with the startup time',
@@ -658,7 +694,7 @@ test(
             h.ok(vim.wait(500, win_open), 'the window never opened')
             ui.open()
             local first = header_text()
-            h.ok(first:find('Sarcina%s+⤓ Installing 0/1  .-   0%% $'), first)
+            h.ok(first:find('Sarcina%s+⤓ Installing 0/1 plugin .-0%% $'), first)
             h.ok(not first:find('· slow', 1, true), first)
         end)
         release()

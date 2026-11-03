@@ -50,10 +50,13 @@ local function run_pending(resolved, names, only)
     end
     local said = {}
     if #cloning > 0 then
-        table.insert(said, string.format('Installing %d: %s', #cloning, table.concat(cloning, ', ')))
+        table.insert(
+            said,
+            'Installing ' .. ui.plural(#cloning, 'plugin') .. ': ' .. table.concat(cloning, ', ')
+        )
     end
     if #loading > 0 then
-        table.insert(said, string.format('Loading %d: %s', #loading, table.concat(loading, ', ')))
+        table.insert(said, 'Loading ' .. ui.plural(#loading, 'plugin') .. ': ' .. table.concat(loading, ', '))
     end
     ui.emit('info', table.concat(said, '. '))
     require('sarcina.stats').register(resolved)
@@ -87,17 +90,18 @@ local function prune(resolved, bang, command)
         ui.emit(
             'info',
             string.format(
-                '%d not in your specs: %s. Run :Sarcina %s! to delete them.',
-                #stale,
+                '%s not in your specs: %s. Run :Sarcina %s! to delete %s.',
+                ui.plural(#stale, 'plugin'),
                 table.concat(stale, ', '),
-                command
+                command,
+                #stale == 1 and 'it' or 'them'
             )
         )
         return true
     end
     local removed, failed = installer.remove(stale)
     if #removed > 0 then
-        ui.emit('info', string.format('Removed %d: %s', #removed, table.concat(removed, ', ')))
+        ui.emit('info', 'Removed ' .. ui.plural(#removed, 'plugin') .. ': ' .. table.concat(removed, ', '))
     end
     for _, failure in ipairs(failed) do
         ui.emit('error', failure.name .. ': ' .. failure.why)

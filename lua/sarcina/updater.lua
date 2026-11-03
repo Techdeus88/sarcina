@@ -91,8 +91,9 @@ function M.summarize(mode, jobs)
     end
     local parts = {}
     if #moved > 0 then
-        local head = mode == 'check' and '%d update%s available: ' or 'Updated %d plugin%s: '
-        table.insert(parts, head:format(#moved, #moved == 1 and '' or 's') .. table.concat(moved, ', '))
+        local head = mode == 'check' and ui.plural(#moved, 'update') .. ' available: '
+            or 'Updated ' .. ui.plural(#moved, 'plugin') .. ': '
+        table.insert(parts, head .. table.concat(moved, ', '))
         table.insert(parts, mode == 'check' and 'Run :Sarcina update.' or 'Restart Neovim to load them.')
     elseif #left == 0 and #failed == 0 then
         table.insert(parts, current == 0 and 'No plugin to ' .. mode or 'Everything is up to date.')
@@ -150,7 +151,11 @@ local function run(mode, resolved, names, finish)
     end
     ui.emit(
         'info',
-        string.format('%s %d plugins...', mode == 'check' and 'Checking' or 'Updating', vim.tbl_count(plans))
+        string.format(
+            '%s %s...',
+            mode == 'check' and 'Checking' or 'Updating',
+            ui.plural(vim.tbl_count(plans), 'plugin')
+        )
     )
     tasks.run_all(function()
         local jobs = tasks.snapshot().jobs
@@ -180,12 +185,7 @@ local function look_summary(state, entries)
     end
     local parts = {}
     if #found > 0 then
-        table.insert(
-            parts,
-            string.format('%d update%s available: ', #found, #found == 1 and '' or 's')
-                .. table.concat(found, ', ')
-                .. '.'
-        )
+        table.insert(parts, ui.plural(#found, 'update') .. ' available: ' .. table.concat(found, ', ') .. '.')
         table.insert(parts, 'Run :Sarcina update.')
     elseif #failed == 0 then
         table.insert(parts, 'Everything is up to date.')
@@ -223,7 +223,7 @@ function M.look(resolved, names)
         ui.emit('warn', 'Local plugins are not checked: ' .. table.concat(local_plugins, ', ') .. '.')
     end
     if #wanted == 0 then return end
-    ui.emit('info', string.format('Checking %d plugin%s...', #wanted, #wanted == 1 and '' or 's'))
+    ui.emit('info', 'Checking ' .. ui.plural(#wanted, 'plugin') .. '...')
     checker.run(wanted, function(state)
         local text, level = look_summary(state, wanted)
         ui.emit(level, text)
@@ -257,12 +257,7 @@ function M.update(resolved, names)
             local text, level = M.summarize('check', jobs)
             return ui.emit(level, text)
         end
-        local prompt = string.format(
-            'Update %d plugin%s?\n%s',
-            #moving,
-            #moving == 1 and '' or 's',
-            table.concat(lines, '\n')
-        )
+        local prompt = 'Update ' .. ui.plural(#moving, 'plugin') .. '?\n' .. table.concat(lines, '\n')
         confirm.ask(prompt, function(yes)
             if not yes then return ui.emit('info', 'Nothing updated') end
             run('update', resolved, moving)

@@ -39,8 +39,8 @@ function M._warn_stale(resolved)
     ui.emit(
         'warn',
         string.format(
-            '%d on disk, not in your specs: %s · :Sarcina delete <name> or clean!',
-            #stale,
+            '%s on disk, not in your specs: %s · :Sarcina delete <name> or clean!',
+            ui.plural(#stale, 'plugin'),
             table.concat(stale, ', ')
         )
     )

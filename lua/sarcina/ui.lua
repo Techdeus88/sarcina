@@ -46,6 +46,9 @@ local LEVELS = {
     error = vim.log.levels.ERROR,
 }
 
+--- `count` and `word`, plural unless it is one: `1 plugin`, `4 plugins`.
+function M.plural(count, word) return count .. ' ' .. word .. (count == 1 and '' or 's') end
+
 local function snapshot() return require('sarcina.tasks').snapshot() end
 
 local function window() return require('sarcina.window') end
@@ -475,7 +478,7 @@ function M._on_done(summary)
         if win_valid() then M.check(true) end
     end
     if summary.total == 0 then return end
-    local text = string.format('%d done', summary.done)
+    local text = M.plural(summary.done, 'task') .. ' done'
     if summary.failed > 0 then text = text .. string.format(', %d failed', summary.failed) end
     if summary.skipped > 0 then text = text .. string.format(', %d skipped', summary.skipped) end
     if summary.failed > 0 then

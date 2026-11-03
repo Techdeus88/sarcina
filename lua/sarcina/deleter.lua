@@ -29,12 +29,7 @@ function M.run(resolved, names)
     end
     if #unknown > 0 then ui.emit('warn', 'Not installed: ' .. table.concat(unknown, ', ')) end
     if #picked == 0 then return end
-    local prompt = string.format(
-        'Delete %d plugin%s: %s?',
-        #picked,
-        #picked == 1 and '' or 's',
-        table.concat(picked, ', ')
-    )
+    local prompt = 'Delete ' .. ui.plural(#picked, 'plugin') .. ': ' .. table.concat(picked, ', ') .. '?'
     if #kept > 0 then
         prompt = prompt
             .. '\nStill in your specs, so it installs again at the next startup: '
@@ -44,7 +39,10 @@ function M.run(resolved, names)
         if not yes then return ui.emit('info', 'Nothing deleted') end
         local removed, failed = installer.remove(picked)
         if #removed > 0 then
-            ui.emit('info', string.format('Deleted %d: %s', #removed, table.concat(removed, ', ')))
+            ui.emit(
+                'info',
+                'Deleted ' .. ui.plural(#removed, 'plugin') .. ': ' .. table.concat(removed, ', ')
+            )
         end
         for _, failure in ipairs(failed) do
             ui.emit('error', failure.name .. ': ' .. failure.why)

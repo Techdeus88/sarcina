@@ -7,6 +7,8 @@
 local paths = require('sarcina.paths')
 local stats = require('sarcina.stats')
 
+local function plural(count, word) return require('sarcina.ui').plural(count, word) end
+
 local M = {}
 
 local NS = vim.api.nvim_create_namespace('sarcina_window')
@@ -290,8 +292,8 @@ function M.summary(numbers)
     local startup = numbers.startup_ms and string.format('startup %.0f ms', numbers.startup_ms)
         or 'startup pending'
     return string.format(
-        '%d plugins · %d loaded · %d not loaded · %d now · %d later · %d triggered · %s',
-        numbers.count,
+        '%s · %d loaded · %d not loaded · %d now · %d later · %d triggered · %s',
+        plural(numbers.count, 'plugin'),
         numbers.loaded,
         numbers.not_loaded,
         numbers.now,
@@ -352,8 +354,6 @@ local function row_line(row)
 end
 
 local function short(commit) return commit:sub(1, 7) end
-
-local function plural(count, word) return count .. ' ' .. word .. (count == 1 and '' or 's') end
 
 local function breaking_count(commits)
     local count = 0
@@ -541,6 +541,7 @@ local function activity_parts(room)
     local head = {
         { kind.icon .. ' ' .. kind.label .. ' ', 'SarcinaRunning' },
         { string.format('%d/%d', finished, total), 'SarcinaStepTime' },
+        { ' ' .. (total == 1 and 'plugin' or 'plugins'), 'SarcinaNote' },
     }
     local name = current and { { ' · ' .. current, 'SarcinaName' } } or {}
     local bar = {
@@ -639,7 +640,7 @@ end
 local BRAND = { { 'Sarcina', 'SarcinaBrand' } }
 
 local function header_lines()
-    local text = string.format(' Total: %d plugin%s', #names, #names == 1 and '' or 's')
+    local text = ' Total: ' .. plural(#names, 'plugin')
     local task, tasks, loaded = 0, 0, 0
     for _, name in ipairs(names) do
         task, tasks = task + rows[name].task, tasks + rows[name].tasks
@@ -655,7 +656,7 @@ local function header_lines()
     }
     vim.list_extend(counts, totals_parts())
     local progress =
-        { { tostring(task), 'SarcinaStepTime' }, { string.format('/%d tasks', tasks), 'SarcinaNote' } }
+        { { tostring(task), 'SarcinaStepTime' }, { '/' .. plural(tasks, 'task'), 'SarcinaNote' } }
     local function center_end(parts)
         return math.floor((view.full_w - parts_width(parts)) / 2) + parts_width(parts)
     end

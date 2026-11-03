@@ -72,7 +72,7 @@ test('clean only lists them, and says how to delete them', function()
     plugin_dir('clgone.nvim')
     clean(false)
     h.ok(
-        h.notified('1 not in your specs: clgone.nvim. Run :Sarcina clean! to delete them.'),
+        h.notified('1 plugin not in your specs: clgone.nvim. Run :Sarcina clean! to delete it.'),
         vim.inspect(h.notes)
     )
     h.eq({ exists('clkeep.nvim'), exists('clgone.nvim') }, { true, true })
@@ -95,7 +95,7 @@ test(
         lock._reset()
         clean(true)
         h.eq({ exists('clkeep.nvim'), exists('clgone.nvim'), exists('clgone2.nvim') }, { true, false, false })
-        h.ok(h.notified('Removed 2: clgone.nvim, clgone2.nvim'), vim.inspect(h.notes))
+        h.ok(h.notified('Removed 2 plugins: clgone.nvim, clgone2.nvim'), vim.inspect(h.notes))
         h.ok(not vim.tbl_contains(vim.opt.rtp:get(), gone), 'the removed plugin is still on the runtimepath')
         installs._reset()
         lock._reset()
@@ -179,7 +179,7 @@ test(
         h.ok(not prompts[1]:find('startup: rmgone', 1, true), prompts[1])
         h.eq(exists('rmkept.nvim'), false)
         h.eq(exists('rmgone.nvim'), false)
-        h.ok(h.notified('Deleted 2: rmkept.nvim, rmgone.nvim'), vim.inspect(h.notes))
+        h.ok(h.notified('Deleted 2 plugins: rmkept.nvim, rmgone.nvim'), vim.inspect(h.notes))
     end
 )
 

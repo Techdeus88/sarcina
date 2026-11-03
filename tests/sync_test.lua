@@ -72,7 +72,7 @@ test('a second install leaves a loaded plugin alone, so its config runs once', f
     local remote = h.upstream()
     manifest({ { name = 'inonce.nvim', remote = remote } })
     install()
-    h.ok(h.notified('Installing 1: inonce.nvim'), vim.inspect(h.notes))
+    h.ok(h.notified('Installing 1 plugin: inonce.nvim'), vim.inspect(h.notes))
     h.ok(loaded('inonce.nvim'), 'the plugin is not loaded')
     install()
     h.eq(_G.sync_configs, { ['inonce.nvim'] = 1 })
@@ -85,7 +85,7 @@ test('install loads a plugin that is on disk but has not loaded in this session'
     installed('inondisk.nvim', remote)
     manifest({ { name = 'inondisk.nvim', remote = remote } })
     install()
-    h.ok(h.notified('Loading 1: inondisk.nvim'), vim.inspect(h.notes))
+    h.ok(h.notified('Loading 1 plugin: inondisk.nvim'), vim.inspect(h.notes))
     h.eq(_G.sync_configs, { ['inondisk.nvim'] = 1 })
     h.ok(loaded('inondisk.nvim'), 'the plugin is not loaded')
 end)
@@ -151,7 +151,8 @@ test('sync installs and loads what has not loaded, and leaves the loaded plugins
     h.eq(h.head(paths.install('syncnew.nvim')), h.head(remote))
     h.ok(loaded('syncnew.nvim'), 'the new plugin is not loaded')
     h.eq(_G.sync_configs, { ['synchad.nvim'] = 1, ['syncnew.nvim'] = 1 })
-    h.ok(h.notified('Installing 1: syncnew.nvim'), vim.inspect(h.notes))
+    h.ok(h.notified('Installing 1 plugin: syncnew.nvim'), vim.inspect(h.notes))
+    h.ok(not h.notified('1 plugins'), vim.inspect(h.notes))
 end)
 
 test('sync lists the directories no spec owns and says how to delete them', function()
@@ -162,7 +163,7 @@ test('sync lists the directories no spec owns and says how to delete them', func
     manifest({ { name = 'synckeep.nvim', remote = remote } })
     sync(false)
     h.ok(
-        h.notified('1 not in your specs: syncgone.nvim. Run :Sarcina sync! to delete them.'),
+        h.notified('1 plugin not in your specs: syncgone.nvim. Run :Sarcina sync! to delete it.'),
         vim.inspect(h.notes)
     )
     h.eq(exists('syncgone.nvim'), true)
@@ -176,7 +177,7 @@ test('sync! deletes them and installs what is missing in the same go', function(
     manifest({ { name = 'syncfresh.nvim', remote = remote } })
     sync(true)
     h.eq({ exists('syncold.nvim'), exists('syncfresh.nvim') }, { false, true })
-    h.ok(h.notified('Removed 1: syncold.nvim'), vim.inspect(h.notes))
+    h.ok(h.notified('Removed 1 plugin: syncold.nvim'), vim.inspect(h.notes))
     h.eq(_G.sync_configs, { ['syncfresh.nvim'] = 1 })
     -- The bang may come after the command too.
     vim.fn.mkdir(paths.install('syncold2.nvim'), 'p')
