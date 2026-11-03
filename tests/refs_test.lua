@@ -137,7 +137,13 @@ test('a version that is not a range names a branch, a tag or a commit', function
     local edge = h.head(remote)
     h.eq(h.head(install('bytag.nvim', remote, { version = 'stable' })), old)
     h.eq(h.head(install('bybranch.nvim', remote, { version = 'edge' })), edge)
-    h.eq(h.head(install('bycommit.nvim', remote, { version = old:sub(1, 10) })), old)
+    -- A string of digits is read as a version, so the abbreviation has to hold a letter, as a real one mostly does.
+    local abbreviated = old:sub(1, 10)
+    for length = 11, 40 do
+        if abbreviated:find('%a') then break end
+        abbreviated = old:sub(1, length)
+    end
+    h.eq(h.head(install('bycommit.nvim', remote, { version = abbreviated })), old)
     h.advance(remote)
     update('bybranch.nvim', remote, { version = 'edge' })
     h.eq(h.head(paths.install('bybranch.nvim')), h.head(remote))

@@ -59,7 +59,7 @@ function M.reset()
     ui.show = 'auto'
     -- A test that wants the window to look for updates when it opens says so.
     ui.check_on_open = false
-    ui.backdrop = 0
+    ui.backdrop = 50
     ui._check_after_run = false
     -- Tests run as a session with a colorscheme, so the window does not wait for one. A test that wants none unsets it.
     if vim.g.colors_name == nil then vim.cmd.colorscheme('default') end
@@ -69,12 +69,13 @@ function M.reset()
     require('sarcina.installer').removed = 0
     require('sarcina.window').changelog = false
     require('sarcina.window').height = 'regular'
+    -- A test that wants flat ends sets it, and a test that fails before putting it back must not leak it.
+    require('sarcina.window').rounded = true
     -- Sarcina's own checkout is this repository: a test that wants a self-check points it at a repo of its own.
     require('sarcina.self').root = false
     require('sarcina.self').pin = nil
     require('sarcina.window').select_mode = false
     require('sarcina.window').clear_marks()
-    ui.close_delay = 60000
 end
 
 function M.eq(actual, expected, msg)

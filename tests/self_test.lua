@@ -122,16 +122,16 @@ test(
         ui._flush()
         local lines = vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false)
         h.ok(
-            lines[2]:find(
+            lines[3]:find(
                 '↑ sarcina ' .. h.head(remote):sub(1, 7) .. ' feat: sarcina 1 · 1 commit behind',
                 1,
                 true
             ),
-            lines[2]
+            lines[3]
         )
-        h.eq(window.entry_at(2), { kind = 'update', name = 'sarcina' })
+        h.eq(window.entry_at(3), { kind = 'update', name = 'sarcina' })
         vim.api.nvim_set_current_win(ui._winid)
-        vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+        vim.api.nvim_win_set_cursor(ui._winid, { 3, 0 })
         vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
         h.eq(window.selected(), 'sarcina')
         local text = table.concat(vim.api.nvim_buf_get_lines(ui._detail_bufnr, 0, -1, false), '\n')

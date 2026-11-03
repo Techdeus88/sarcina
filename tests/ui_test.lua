@@ -59,6 +59,31 @@ end
 
 local function working(name) return { name = name, tasks = { { id = 'a', type = 't_work' } } } end
 
+-- Real work that is over at once, so a test can finish a run without waiting on a timer of its own.
+executors.t_work_now = function(job, done)
+    job.working = true
+    done(true)
+end
+
+local function work_now(name) return { name = name, tasks = { { id = 'a', type = 't_work_now' } } } end
+
+-- Collects the vim.defer_fn callbacks scheduled while `body` runs. `elapse()` runs them all, and the ones they
+-- schedule, as if all the time had passed.
+local function with_timers(body)
+    local real, timers = vim.defer_fn, {}
+    ---@diagnostic disable-next-line: duplicate-set-field
+    vim.defer_fn = function(fn) table.insert(timers, fn) end
+    local ok, err = pcall(body, function()
+        local i = 1
+        while timers[i] do
+            timers[i]()
+            i = i + 1
+        end
+    end)
+    vim.defer_fn = real
+    assert(ok, err)
+end
+
 test('a failure opens the window on its own', function()
     run({ failing('a') })
     h.ok(vim.wait(200, win_open))
@@ -122,8 +147,7 @@ test('the cursor sits on the plugin at work, else on the last failed one', funct
     h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], require('sarcina.window').line('c'))
 end)
 
-test('a clean appended run does not auto-close a window that still shows a failure', function()
-    ui.close_delay = 50
+test('a clean appended run leaves a window that still shows a failure open', function()
     run({ failing('a') })
     h.ok(vim.wait(200, win_open))
     append_run({ loaded('b') })
@@ -195,18 +219,48 @@ test('q dismisses the window', function()
     h.eq(ui._dismissed, true)
 end)
 
-test('a clean run closes the window after close_delay', function()
-    ui.close_delay = 50
-    h.register({ working('w') })
-    tasks.enqueue('w', working('w'))
-    tasks.run_all()
-    h.ok(vim.wait(200, win_open))
-    h.ok(tasks.wait(2000))
-    h.ok(vim.wait(500, function() return not win_open() end))
+test('no timer closes the window after a clean run', function()
+    with_timers(function(elapse)
+        h.register({ work_now('w') })
+        tasks.enqueue('w', work_now('w'))
+        tasks.run_all()
+        h.ok(tasks.wait(2000))
+        h.ok(vim.wait(200, win_open), 'the window never opened')
+        elapse()
+        vim.wait(50)
+        h.ok(win_open(), 'a timer closed the window')
+    end)
+    ui.dismiss()
+    h.eq(win_open(), false)
+end)
+
+test('a message that expires from the header leaves the window open', function()
+    with_timers(function(elapse)
+        ui.emit('info', 'hello')
+        h.ok(vim.wait(200, win_open), 'a message did not open the window')
+        elapse()
+        vim.wait(50)
+        h.eq(require('sarcina.window').message, nil)
+        h.ok(win_open(), 'the window left with its message')
+    end)
+end)
+
+test('a failure right after a clean run is not closed by the clean run', function()
+    with_timers(function(elapse)
+        h.register({ work_now('w') })
+        tasks.enqueue('w', work_now('w'))
+        tasks.run_all()
+        h.ok(tasks.wait(2000))
+        h.ok(vim.wait(200, win_open), 'the window never opened')
+        run({ failing('f') })
+        elapse()
+        vim.wait(50)
+        h.eq(tasks.snapshot().counts.failed, 1)
+        h.ok(win_open(), 'the clean run closed the window on a failure')
+    end)
 end)
 
 test('a window opened by hand stays after a clean run', function()
-    ui.close_delay = 50
     run({ loaded('a') })
     ui.open()
     h.ok(win_open())
@@ -321,19 +375,24 @@ test(':Sarcina log opens the log file, and says so when there is none', function
     vim.cmd('close')
 end)
 
-local function backdrop_open() return ui._backdrop_winid ~= nil and vim.api.nvim_win_is_valid(ui._backdrop_winid) end
+local function backdrop_open()
+    return ui._backdrop_winid ~= nil and vim.api.nvim_win_is_valid(ui._backdrop_winid)
+end
 
-test('a window opened by hand has a backdrop over the editor, under the window, gone when it closes', function()
-    run({ loaded('a') })
-    ui.open()
-    h.ok(backdrop_open(), 'no backdrop')
-    local config = vim.api.nvim_win_get_config(ui._backdrop_winid)
-    h.eq({ config.width, config.height, config.focusable }, { vim.o.columns, vim.o.lines, false })
-    h.ok(config.zindex < vim.api.nvim_win_get_config(ui._winid).zindex, 'the backdrop is over the window')
-    h.eq(vim.wo[ui._backdrop_winid].winblend, 0)
-    vim.cmd('close')
-    h.eq(backdrop_open(), false)
-end)
+test(
+    'a window opened by hand has a backdrop over the editor, under the window, gone when it closes',
+    function()
+        run({ loaded('a') })
+        ui.open()
+        h.ok(backdrop_open(), 'no backdrop')
+        local config = vim.api.nvim_win_get_config(ui._backdrop_winid)
+        h.eq({ config.width, config.height, config.focusable }, { vim.o.columns, vim.o.lines, false })
+        h.ok(config.zindex < vim.api.nvim_win_get_config(ui._winid).zindex, 'the backdrop is over the window')
+        h.eq(vim.wo[ui._backdrop_winid].winblend, 50)
+        vim.cmd('close')
+        h.eq(backdrop_open(), false)
+    end
+)
 
 test('a window that opens by itself has no backdrop until it is opened by hand', function()
     run({ failing('a') })
@@ -356,19 +415,32 @@ test('backdrop takes a blend, false turns it off, and an unknown value warns', f
     h.eq(backdrop_open(), false)
     ui.close()
     ui.configure({ backdrop = 'dim' })
-    h.ok(h.notified('Unknown ui.backdrop dim'))
+    h.ok(h.notified('Unknown ui.backdrop dim, using 50'))
+    h.eq(ui.backdrop, 50)
+end)
+
+test('the backdrop is half transparent unless setup says otherwise', function()
+    ui.configure({ backdrop = 10 })
+    h.eq(ui.backdrop, 10)
+    ui.configure({})
+    h.eq(ui.backdrop, 50)
+    ui.configure({ backdrop = 0 })
     h.eq(ui.backdrop, 0)
 end)
 
 test('the backdrop follows the editor size', function()
+    ui.init()
     run({ loaded('a') })
     ui.open()
     vim.o.columns, vim.o.lines = vim.o.columns + 10, vim.o.lines + 4
     vim.api.nvim_exec_autocmds('VimResized', {})
-    h.ok(vim.wait(500, function()
-        local config = vim.api.nvim_win_get_config(ui._backdrop_winid)
-        return config.width == vim.o.columns and config.height == vim.o.lines
-    end), 'the backdrop kept its old size')
+    h.ok(
+        vim.wait(500, function()
+            local config = vim.api.nvim_win_get_config(ui._backdrop_winid)
+            return config.width == vim.o.columns and config.height == vim.o.lines
+        end),
+        'the backdrop kept its old size'
+    )
 end)
 
 return tests

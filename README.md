@@ -169,7 +169,7 @@ require('sarcina').setup({
         height = 'regular', -- 80% of the editor tall
         rounded = true, -- rounded ends on the tasks widget
         check_on_open = true, -- look for updates when the window opens
-        backdrop = 0, -- black out the editor behind a window you open
+        backdrop = 50, -- how see-through the black layer behind a window you open is: 0 solid, 100 invisible
     },
 })
 ```
@@ -217,7 +217,7 @@ When the window opens by itself.
 | `'always'` | opens at every startup |
 | `'never'` | never opens by itself; messages are kept for `require('sarcina.ui').messages()`. A question still opens it |
 
-A window that opened by itself closes 3 s after a clean run, and a failure keeps it open. `:Sarcina panel` opens it and keeps it open until you close it. See [Window](#window).
+Sarcina never closes the window. One that opened by itself stays until you close it. See [Window](#window).
 
 ### `ui.view`
 
@@ -259,11 +259,14 @@ A check never moves a plugin; `:Sarcina update` does.
 
 | Value | Does |
 | --- | --- |
-| `0` (default) | a window you open (`:Sarcina panel`) covers the editor behind it in solid black |
-| `1`–`100` | the same layer with that `winblend`, so the editor shows through dimmed; `100` is invisible. Needs `termguicolors` |
+| `50` (default) | a window you open (`:Sarcina panel`) lays a half-transparent black layer over the editor behind it, so the editor shows through dimmed |
+| `0` | the same layer in solid black |
+| `1`–`100` | the same layer with that `winblend`; `100` is invisible. Needs `termguicolors` |
 | `false` | no backdrop |
 
-A window that opens by itself during a run gets no backdrop, so it never blacks out the buffer you are typing in; opening it by hand then adds one. The colour is the `SarcinaBackdrop` highlight group.
+`winblend` mixes the layer's colour with what is behind it. It cannot blur: Neovim draws a grid of characters, so the text behind the layer stays sharp and only gets darker.
+
+A window that opens by itself during a run gets no backdrop, so it never covers the buffer you are typing in; opening it by hand then adds one. The colour is the `SarcinaBackdrop` highlight group.
 
 ### Values sarcina does not know
 
@@ -280,7 +283,6 @@ These are fields of the modules, not options of `setup()`. Set them before `setu
 | `require('sarcina.checker').max_concurrent` | `8` | remotes a check for updates asks at once |
 | `require('sarcina.checker').fresh_for` | `300000` (5 min) | how recent, in ms, a check of every plugin can be for an open of the window to skip its own |
 | `require('sarcina.executors').git_timeout` | `600000` (10 min) | how long, in ms, a git command that talks to a remote (a clone, a fetch, `ls-remote`) may run before it is stopped |
-| `require('sarcina.ui').close_delay` | `3000` | how long, in ms, a window that opened by itself stays after a clean run |
 | `require('sarcina.ui').message_ttl` | `8000` | how long, in ms, a message stays in the header; an error stays three times as long |
 
 ## When plugins load
@@ -569,7 +571,7 @@ It opens by itself on a first install (a clone), on a build that runs because th
 | `'always'` | at every startup |
 | `'never'` | never opens by itself. Messages are only kept (`require('sarcina.ui').messages()`); a question still opens it |
 
-A window that opened by itself closes `ui.close_delay` (3 s) after a clean run. A failure keeps it open. `q` or closing the list dismisses all four windows until a failure it has not shown yet, and `:Sarcina panel` brings it back, goes into the list, and keeps it open until you close it.
+Sarcina never closes the window. A window that opened by itself stays, through clean runs and failures alike, until you close it. `q` in the list, closing the list, or `:Sarcina panel` from anywhere closes all four windows, and they stay closed until a failure the window has not shown yet. `:Sarcina panel` also brings the window back and goes into the list.
 
 A load that a trigger starts updates the plugin's row in place, and `ui.on('task', fn)` still hears every job change.
 
@@ -580,7 +582,7 @@ A load that a trigger starts updates the plugin's row in place, and `ui.on('task
 Sarcina never uses `vim.notify`, the command line or a prompt. A line of work belongs to its plugin: the status message on the plugin's row. Everything else goes to the right of the header, on two lines:
 
 - **Line 1** is realtime: the kind of work going on, how many jobs of it ended, the plugin at it and a bar (`⤓ Installing 3/8 · telescope.nvim ███░░░░░░░  37%`).
-- **Line 2** is the last message: what a command says (`› Deleted 2: a, b`, `! Not installed: x`, `✘ 1 failed`), shown until the next one or for 8 s (24 s for an error). A message opens the window if it is closed, and the window closes again with it when nothing else keeps it open. The end-of-run count (`› 12 done`) is shown only if the window is open already.
+- **Line 2** is the last message: what a command says (`› Deleted 2: a, b`, `! Not installed: x`, `✘ 1 failed`), shown until the next one or for 8 s (24 s for an error). A message opens the window if it is closed. When the message times out it leaves the header, and the window stays open. The end-of-run count (`› 12 done`) is shown only if the window is open already.
 - **Forgotten plugins:** at startup, a directory in the plugins directory that no spec owns, because you removed the spec or switched the plugin off, is named: `! 2 on disk, not in your specs: a, b · :Sarcina delete <name> or clean!`. Nothing is deleted. An empty manifest says nothing, since a spec file that failed to load would make every directory look forgotten.
 - **Questions** (`update`, `delete`) take both lines: `? Delete 2 plugins: a, b?` and under it the note and `[y] yes  [n] no`. The window opens and takes focus for it. `y` answers yes; `n`, `<Esc>` or closing the window answer no. `confirm = false` skips them.
 

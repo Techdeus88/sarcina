@@ -10,7 +10,6 @@
 
 local M = {}
 
-M.close_delay = 3000
 -- When the window opens by itself: 'auto' on real work and on a failure, 'always' at every startup, 'never'.
 M.show = 'auto'
 -- Whether opening the window looks for updates (see checker.lua). Off, `C` in the window or :Sarcina check does it.
@@ -18,7 +17,8 @@ M.check_on_open = true
 -- How long a window that opens by itself waits for a colorscheme, ms. See `theme_ready`.
 M.theme_wait = 2000
 -- The black layer behind a window opened by hand: its winblend, 0 solid black to 100 invisible. false: none.
-M.backdrop = 0
+local DEFAULT_BACKDROP = 50
+M.backdrop = DEFAULT_BACKDROP
 
 M._listeners = {}
 M._messages = {} -- every message of the session, as { msg, level }, for tests and for ui.messages()
@@ -34,7 +34,6 @@ M._footer_bufnr = nil
 M._footer_winid = nil
 M._backdrop_winid = nil
 M._dismissed = false
-M._pinned = false -- opened by hand, so a clean run does not close it
 M._seen_failed = 0
 M._closing = false
 M._dirty = {} -- plugin names with an event since the last flush
@@ -113,10 +112,13 @@ function M.configure(opts)
     window().height = height
     M.check_on_open = not opts or opts.check_on_open ~= false
     local backdrop = opts and opts.backdrop
-    if backdrop == nil then backdrop = 0 end
+    if backdrop == nil then backdrop = DEFAULT_BACKDROP end
     if backdrop ~= false and not (type(backdrop) == 'number' and backdrop >= 0 and backdrop <= 100) then
-        M.emit('warning', string.format('Unknown ui.backdrop %s, using 0', tostring(backdrop)))
-        backdrop = 0
+        M.emit(
+            'warning',
+            string.format('Unknown ui.backdrop %s, using %d', tostring(backdrop), DEFAULT_BACKDROP)
+        )
+        backdrop = DEFAULT_BACKDROP
     end
     M.backdrop = backdrop
 end
@@ -192,7 +194,9 @@ end
 local function backdrop_valid() return M._backdrop_winid and vim.api.nvim_win_is_valid(M._backdrop_winid) end
 
 -- The whole editor, for the backdrop.
-local function backdrop_config() return { relative = 'editor', row = 0, col = 0, width = vim.o.columns, height = vim.o.lines } end
+local function backdrop_config()
+    return { relative = 'editor', row = 0, col = 0, width = vim.o.columns, height = vim.o.lines }
+end
 
 -- A float over the whole editor, under the windows (zindex 50), so nothing behind them shows through.
 local function open_backdrop()
@@ -529,7 +533,6 @@ local function open_window(enter)
                 M._seen_failed = snapshot().counts.failed
             end
             M._winid = nil
-            M._pinned = false
             close_panes()
             window().closed()
             if M._question then vim.schedule(function() M._answer(false) end) end
@@ -636,12 +639,6 @@ function M._on_done(summary)
             pcall(fn, 'info', text)
         end
     end
-    -- Failures from earlier in the session keep the window open, whichever run this was.
-    if snapshot().counts.failed == 0 and not M._pinned then
-        vim.defer_fn(function()
-            if not M._pinned and not require('sarcina.tasks').has_active() then M.close() end
-        end, M.close_delay)
-    end
 end
 
 -- A message for the right of the header: it is kept, shown until the next one or until it times out, and it opens
@@ -658,11 +655,6 @@ function M._on_message(level, text, passive)
         if window().message ~= message then return end
         window().message = nil
         schedule_flush()
-        -- A window a message opened by itself goes away with the message, unless there is work or a question.
-        vim.defer_fn(function()
-            local busy = M._pinned or M._question or require('sarcina.tasks').has_active()
-            if win_valid() and not busy and snapshot().counts.failed == 0 then M.close() end
-        end, M.close_delay)
     end, ttl)
 end
 
@@ -724,11 +716,10 @@ function M.on(event, callback)
     end)
 end
 
---- Open the window and go into it. It stays until you close it.
+--- Open the window and go into it.
 function M.open()
     if #require('sarcina.stats').plugins() == 0 then return M.emit('info', 'No task activity yet') end
     M._dismissed = false
-    M._pinned = true
     if win_valid() then
         open_backdrop()
         window().draw(buffers())
@@ -748,7 +739,6 @@ function M.close()
     window().closed()
     M._closing = false
     M._bufnr, M._winid = nil, nil
-    M._pinned = false
 end
 
 function M.dismiss()

@@ -54,14 +54,10 @@ local function details() return vim.api.nvim_buf_get_lines(ui._detail_bufnr, 0, 
 
 local function details_text() return table.concat(details(), '\n') end
 
-local function title_of(winid)
-    local title = vim.api.nvim_win_get_config(winid).title
-    if type(title) == 'table' then
-        title = table.concat(
-            vim.tbl_map(function(chunk) return type(chunk) == 'table' and chunk[1] or chunk end, title)
-        )
-    end
-    return title
+-- The name of the plugin the details show: the line under the blank one at the top of the details.
+local function detail_name()
+    local line = details()[2]
+    return line and vim.trim(line) or nil
 end
 
 local function loaded(name) return { name = name, tasks = { h.lua('rtp', h.noop) } } end
@@ -871,7 +867,7 @@ test('the details show where a plugin comes from, what it waits for, and each of
         end
         local path = vim.fn.fnamemodify(paths.install('detailed'), ':~')
         h.ok(text:find('path%s+' .. vim.pesc(path)), text)
-        h.eq(title_of(ui._detail_winid), ' detailed ')
+        h.eq(detail_name(), 'detailed')
         h.eq({ vim.wo[ui._detail_winid].wrap, vim.wo[ui._detail_winid].breakindent }, { true, true })
     end)
 end)
@@ -1036,7 +1032,7 @@ test(
             h.ok(top_of(ui._detail_winid) > 1)
             vim.api.nvim_win_set_cursor(ui._winid, { window.line('b'), 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-            h.eq(title_of(ui._detail_winid), ' b ')
+            h.eq(detail_name(), 'b')
             h.eq(top_of(ui._detail_winid), 1)
         end)
     end
@@ -1062,16 +1058,16 @@ test('the details follow the cursor of the list', function()
     h.register({ loaded('a'), loaded('b'), loaded('c') })
     with_size(200, 50, function()
         ui.open()
-        h.eq(title_of(ui._detail_winid), ' a ')
+        h.eq(detail_name(), 'a')
         for _, name in ipairs({ 'b', 'c', 'a' }) do
             vim.api.nvim_win_set_cursor(ui._winid, { window.line(name), 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-            h.eq(title_of(ui._detail_winid), ' ' .. name .. ' ')
+            h.eq(detail_name(), name)
         end
         -- A section header names no plugin, so the details stay on the last one.
         vim.api.nvim_win_set_cursor(ui._winid, { 1, 0 })
         vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-        h.eq(title_of(ui._detail_winid), ' a ')
+        h.eq(detail_name(), 'a')
     end)
 end)
 
@@ -1087,7 +1083,7 @@ test('the details follow the plugin at work while you are not in the window', fu
                 500,
                 function()
                     return ui._detail_winid
-                        and title_of(ui._detail_winid) == ' b '
+                        and detail_name() == 'b'
                         and details_text():find('Receiving objects', 1, true)
                 end
             ),
@@ -1119,7 +1115,7 @@ test(
             tasks.run_all()
             h.ok(vim.wait(500, function() return lines()[2]:find('installing', 1, true) end), lines()[2])
             h.eq(redrawn, 0)
-            h.eq(title_of(ui._detail_winid), ' a ')
+            h.eq(detail_name(), 'a')
             release()
             h.ok(tasks.wait(2000))
             -- b loaded and moved above a; the cursor went with a.
@@ -1128,7 +1124,7 @@ test(
                 'the rows did not move'
             )
             h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], window.line('a'))
-            h.eq(title_of(ui._detail_winid), ' a ')
+            h.eq(detail_name(), 'a')
         end)
     end
 )
@@ -1178,7 +1174,7 @@ test(
         h.eq({ move(8) }, { 7, 'l2' }) -- nothing below the last plugin: back to it
         h.eq({ move(5) }, { 3, 'n1' }) -- up onto the Later header: back to n1
         h.eq({ move(1) }, { 3, 'n1' }) -- nothing above the first header: the first plugin below it
-        h.eq(title_of(ui._detail_winid), ' n1 ')
+        h.eq(detail_name(), 'n1')
     end
 )
 
@@ -1192,8 +1188,15 @@ test('a line with no plugin shows no details', function()
     h.eq(details(), { '' })
     window.select(3)
     h.eq(window.draw_details(ui._detail_bufnr), 'a')
-    -- A blank line above the details and one below them.
-    h.eq({ details()[1], details()[2]:find('^state') ~= nil, details()[#details()] }, { '', true, '' })
+    -- A blank line above the name of the plugin, one under it, and one below the details.
+    local shown = details()
+    h.eq({ shown[1], vim.trim(shown[2]), shown[3], shown[4]:find('^state') ~= nil, shown[#shown] }, {
+        '',
+        'a',
+        '',
+        true,
+        '',
+    })
 end)
 
 test('entry_at maps the lines of the list to their plugins', function()
@@ -1257,8 +1260,9 @@ if vim.fn.executable('git') == 1 then
         local script = vim.fn.tempname() .. '.lua'
         vim.fn.writefile({
             string.format('vim.opt.rtp:prepend(%q)', root),
+            -- A window that opens by itself waits for a colorscheme; a real setup has one.
+            "vim.cmd.colorscheme('default')",
             "require('sarcina').setup()",
-            "require('sarcina.ui').close_delay = 60000",
             "vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()",
             '    vim.defer_fn(function()',
             "        require('sarcina.tasks').wait(10000)",

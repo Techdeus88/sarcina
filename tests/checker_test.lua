@@ -167,44 +167,50 @@ test(
 )
 
 -- The title on the top border of the list, as text.
+-- The Updates heading: the first line of the list under the blank one, or '' when the list has none.
 local function list_title()
-    local title = vim.api.nvim_win_get_config(ui._winid).title
-    if type(title) ~= 'table' then return title or '' end
-    return table.concat(vim.tbl_map(function(chunk) return chunk[1] end, title))
+    local line = buffer_lines()[2] or ''
+    return line:find('^ Updates %(') and line or ''
 end
 
-test('while a check runs the list title says checking, and then the list starts with each update', function()
-    local remote = behind_by_three('upd.nvim')
-    h.register({ spec('upd.nvim', remote), { name = 'other' } })
-    window.rounded = false
-    vim.o.columns, vim.o.lines = 200, 50
-    ui.open()
-    checker.run()
-    ui._flush()
-    h.eq(list_title(), ' Updates (0) ↻ checking… ')
-    finished()
-    ui._flush()
-    h.eq(list_title(), ' Updates (1) <CR> changelog ')
-    -- The title sits on the top border, level with the name of the plugin over the details.
-    local list, detail = vim.api.nvim_win_get_config(ui._winid), vim.api.nvim_win_get_config(ui._detail_winid)
-    h.eq(list.row, detail.row)
-    local lines = buffer_lines()
-    h.eq(lines[1], '')
-    h.eq(
-        lines[2],
-        '    ↑ upd.nvim ' .. h.head(remote):sub(1, 7) .. ' feat: two · 3 commits behind  △ 2 breaking'
-    )
-    h.eq(lines[3], '')
-    h.eq(lines[4], ' Later (2)')
-    h.eq(lines[#lines], '')
-    h.eq(window.entry_at(2), { kind = 'update', name = 'upd.nvim' })
-    -- The cursor moves onto an update, and the details show that plugin.
-    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
-    vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-    h.eq(window.selected(), 'upd.nvim')
-    h.ok(details_text():find('update%s+%x+ · 3 commits behind  △ 2 breaking'), details_text())
-    window.rounded = true
-end)
+test(
+    'while a check runs the list heading says checking, and then the list starts with each update',
+    function()
+        local remote = behind_by_three('upd.nvim')
+        h.register({ spec('upd.nvim', remote), { name = 'other' } })
+        window.rounded = false
+        vim.o.columns, vim.o.lines = 200, 50
+        ui.open()
+        checker.run()
+        ui._flush()
+        h.eq(list_title(), ' Updates (0) ↻ checking… ')
+        finished()
+        ui._flush()
+        h.eq(list_title(), ' Updates (1) <CR> changelog ')
+        -- The heading is the second line of the list, level with the name of the plugin over the details.
+        local list, detail =
+            vim.api.nvim_win_get_config(ui._winid), vim.api.nvim_win_get_config(ui._detail_winid)
+        h.eq(list.row, detail.row)
+        local lines = buffer_lines()
+        h.eq(lines[1], '')
+        h.eq(
+            lines[3],
+            '    ↑ upd.nvim '
+                .. h.head(remote):sub(1, 7)
+                .. ' feat: two · 3 commits behind  △ 2 breaking'
+        )
+        h.eq(lines[4], '')
+        h.eq(lines[5], ' Later (2)')
+        h.eq(lines[#lines], '')
+        h.eq(window.entry_at(3), { kind = 'update', name = 'upd.nvim' })
+        -- The cursor moves onto an update, and the details show that plugin.
+        vim.api.nvim_win_set_cursor(ui._winid, { 3, 0 })
+        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+        h.eq(window.selected(), 'upd.nvim')
+        h.ok(details_text():find('update%s+%x+ · 3 commits behind  △ 2 breaking'), details_text())
+        window.rounded = true
+    end
+)
 
 test(
     'while its remote is asked a plugin row says checking, and after the check it is back as it was',
@@ -219,28 +225,32 @@ test(
         h.eq(stats.plugin('row.nvim').state, 'checking')
         ui._flush()
         local line = buffer_lines()[window.line('row.nvim')]
-        h.ok(line:find('▶  checking for updates…', 1, true), line)
+        h.ok(line:find('▶', 1, true) and line:find('checking for updates…', 1, true), line)
         finished()
         h.eq(checker.state().looking, {})
         h.eq(stats.plugin('row.nvim').state, before)
     end
 )
 
-test('a check that found nothing says up to date, and with nothing to check the list has no title', function()
-    local remote = h.upstream()
-    installed('fresh.nvim', remote)
-    h.register({ spec('fresh.nvim', remote) })
-    ui.open()
-    check()
-    ui._flush()
-    h.eq(list_title(), ' Updates (0) ✔ up to date ')
-    h.eq(buffer_lines()[2], ' Later (1)')
-    checker._reset()
-    h.register({ { name = 'nothing' } })
-    check()
-    ui._flush()
-    h.eq(list_title(), '')
-end)
+test(
+    'a check that found nothing says up to date, and with nothing to check the list has no heading',
+    function()
+        local remote = h.upstream()
+        installed('fresh.nvim', remote)
+        h.register({ spec('fresh.nvim', remote) })
+        ui.open()
+        check()
+        ui._flush()
+        h.eq(list_title(), ' Updates (0) ✔ up to date ')
+        h.eq(buffer_lines()[4], ' Later (1)')
+        checker._reset()
+        h.register({ { name = 'nothing' } })
+        check()
+        ui._flush()
+        h.eq(list_title(), '')
+        h.eq(buffer_lines()[2], ' Later (1)')
+    end
+)
 
 test('enter shows the changelog of an update in the details, and enter again shows the tasks', function()
     local remote = behind_by_three('log.nvim')
@@ -336,11 +346,11 @@ test('in the select view an update row has a pick box, and Space picks its plugi
     vim.api.nvim_set_current_win(ui._winid)
     local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
     press('v')
-    h.ok(buffer_lines()[2]:find('^ ○  ↑ pick%.nvim'), buffer_lines()[2])
-    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+    h.ok(buffer_lines()[3]:find('^ ○  ↑ pick%.nvim'), buffer_lines()[3])
+    vim.api.nvim_win_set_cursor(ui._winid, { 3, 0 })
     press('<Space>')
     h.eq(window.marked(), { 'pick.nvim' })
-    h.ok(buffer_lines()[2]:find('^ ✔  ↑ pick%.nvim'), buffer_lines()[2])
+    h.ok(buffer_lines()[3]:find('^ ✔  ↑ pick%.nvim'), buffer_lines()[3])
     -- The same plugin is picked in its section too.
     local row = buffer_lines()[window.line('pick.nvim')]
     h.ok(row:find('^ ✔ pick%.nvim'), row)
