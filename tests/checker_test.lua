@@ -65,6 +65,9 @@ local function details_text()
     return table.concat(vim.api.nvim_buf_get_lines(ui._detail_bufnr, 0, -1, false), '\n')
 end
 
+-- Whether the details carry the `update` line of a plugin that has an update, and not a task named update.
+local function shows_update() return details_text():find('\nupdate%s+%x+ ·') ~= nil end
+
 test(
     'a plugin that is behind is found with the commits in between, newest first, and which of them break',
     function()
@@ -163,55 +166,97 @@ test(
     end
 )
 
--- The Updates heading: the first line of the list under the blank one, or '' when the list has none.
-local function list_title()
-    local line = buffer_lines()[2] or ''
-    return line:find('^ Updates %(') and line or ''
-end
+test('a check adds no line to the list, and the plugin with an update shows it in its details', function()
+    local remote = behind_by_three('upd.nvim')
+    h.register({ spec('upd.nvim', remote), { name = 'other' } })
+    window.rounded = false
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    h.eq(window.selected(), 'upd.nvim')
+    h.eq(shows_update(), false)
+    checker.run()
+    ui._flush()
+    finished()
+    ui._flush()
+    -- The list is the rows of the plugins between its two blank lines: no heading, no row for the update.
+    local lines = buffer_lines()
+    h.eq(#lines, 4)
+    h.eq(lines[1], '')
+    h.ok(lines[2]:find('^   upd%.nvim'), lines[2])
+    h.ok(lines[3]:find('^   other'), lines[3])
+    h.eq(lines[4], '')
+    h.eq(table.concat(lines, '\n'):find('Updates', 1, true), nil)
+    h.eq(window.entry_at(2), { kind = 'plugin', name = 'upd.nvim' })
+    -- The details of the selected plugin took the update without the cursor moving.
+    h.ok(details_text():find('update%s+%x+ · 3 commits behind  △ 2 breaking'), details_text())
+    -- Another plugin shows none.
+    vim.api.nvim_win_set_cursor(ui._winid, { 3, 0 })
+    vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+    h.eq(window.selected(), 'other')
+    h.eq(shows_update(), false)
+    window.rounded = true
+end)
 
-test(
-    'while a check runs the list heading says checking, and then the list starts with each update',
-    function()
-        local remote = behind_by_three('upd.nvim')
-        h.register({ spec('upd.nvim', remote), { name = 'other' } })
-        window.rounded = false
-        vim.o.columns, vim.o.lines = 200, 50
-        ui.open()
-        checker.run()
-        ui._flush()
-        h.eq(list_title(), ' Updates (0) ↻ checking… ')
-        finished()
-        ui._flush()
-        h.eq(list_title(), ' Updates (1) <CR> changelog ')
-        -- The heading is the second line of the list, level with the name of the plugin over the details.
-        local list, detail =
-            vim.api.nvim_win_get_config(ui._winid), vim.api.nvim_win_get_config(ui._detail_winid)
-        h.eq(list.row, detail.row)
-        local lines = buffer_lines()
-        h.eq(lines[1], '')
-        h.eq(
-            lines[3],
-            '    ↑ upd.nvim '
-                .. h.head(remote):sub(1, 7)
-                .. ' feat: two · 3 commits behind  △ 2 breaking'
-        )
-        h.eq(lines[4], '')
-        h.ok(lines[5]:find('^   upd%.nvim'), lines[5])
-        h.ok(lines[6]:find('^   other'), lines[6])
-        h.eq(lines[#lines], '')
-        h.eq(window.entry_at(3), { kind = 'update', name = 'upd.nvim' })
-        -- The cursor moves onto an update, and the details show that plugin.
-        vim.api.nvim_win_set_cursor(ui._winid, { 3, 0 })
-        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-        h.eq(window.selected(), 'upd.nvim')
-        h.ok(details_text():find('update%s+%x+ · 3 commits behind  △ 2 breaking'), details_text())
-        -- The Updates heading names no plugin: a cursor put on it goes on to the update below.
-        vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
-        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-        h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 3)
-        window.rounded = true
-    end
-)
+test('after a check the row of a plugin that is behind says so, and the other rows do not change', function()
+    local remote = behind_by_three('news.nvim')
+    h.register({ spec('news.nvim', remote), { name = 'other' } })
+    window.rounded = false
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    local others = buffer_lines()[window.line('other')]
+    local before = buffer_lines()[window.line('news.nvim')]
+    h.ok(not before:find('↑', 1, true), before)
+    check()
+    ui._flush()
+    local row = buffer_lines()[window.line('news.nvim')]
+    h.ok(row:find('↑ ' .. h.head(remote):sub(1, 7) .. ' · 3 commits behind  △ 2 breaking', 1, true), row)
+    h.eq(buffer_lines()[window.line('other')], others)
+    local stats_row = require('sarcina.stats').plugin('news.nvim')
+    h.eq({ stats_row.update.to, stats_row.changed }, { h.head(remote), nil })
+    window.rounded = true
+end)
+
+test('an update with nothing to do leaves the row exactly as it was', function()
+    local remote = h.upstream()
+    installed('steady.nvim', remote)
+    local plugin = spec('steady.nvim', remote, { tasks = { h.lua('load', h.noop), h.lua('rtp', h.noop) } })
+    h.register({ plugin })
+    h.run({ plugin })
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    local before = buffer_lines()[window.line('steady.nvim')]
+    h.ok(before:find('2/2', 1, true), before)
+    updater.update({ { name = 'steady.nvim', timing = 'later', spec = plugin } }, {})
+    h.ok(tasks.wait(15000), 'the update did not finish')
+    ui._flush()
+    h.eq(buffer_lines()[window.line('steady.nvim')], before)
+end)
+
+test('a check that found nothing leaves the row exactly as it was', function()
+    local remote = h.upstream()
+    installed('same.nvim', remote)
+    local plugin = spec('same.nvim', remote, { tasks = { h.lua('load', h.noop), h.lua('rtp', h.noop) } })
+    h.register({ plugin })
+    h.run({ plugin })
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    local before = buffer_lines()[window.line('same.nvim')]
+    check()
+    ui._flush()
+    h.eq(buffer_lines()[window.line('same.nvim')], before)
+end)
+
+test('a row with news is cut to the width of the list and keeps its news first', function()
+    local remote = behind_by_three('narrow.nvim')
+    h.register({ spec('narrow.nvim', remote) })
+    vim.o.columns, vim.o.lines = 80, 24
+    ui.open()
+    check()
+    ui._flush()
+    local row = buffer_lines()[window.line('narrow.nvim')]
+    h.ok(vim.fn.strdisplaywidth(row) <= vim.api.nvim_win_get_config(ui._winid).width, row)
+    h.ok(row:find('↑', 1, true), 'the update was cut before anything else: ' .. row)
+end)
 
 test(
     'while its remote is asked a plugin row says checking, and after the check it is back as it was',
@@ -233,25 +278,23 @@ test(
     end
 )
 
-test(
-    'a check that found nothing says up to date, and with nothing to check the list has no heading',
-    function()
-        local remote = h.upstream()
-        installed('fresh.nvim', remote)
-        h.register({ spec('fresh.nvim', remote) })
-        ui.open()
-        check()
-        ui._flush()
-        h.eq(list_title(), ' Updates (0) ✔ up to date ')
-        h.ok(buffer_lines()[4]:find('^   fresh%.nvim'), buffer_lines()[4])
-        checker._reset()
-        h.register({ { name = 'nothing' } })
-        check()
-        ui._flush()
-        h.eq(list_title(), '')
-        h.ok(buffer_lines()[2]:find('^   nothing'), buffer_lines()[2])
-    end
-)
+test('a check that found nothing leaves the list as it was and gives the details no update', function()
+    local remote = h.upstream()
+    installed('fresh.nvim', remote)
+    h.register({ spec('fresh.nvim', remote) })
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    local before = buffer_lines()
+    check()
+    ui._flush()
+    h.eq(buffer_lines(), before)
+    h.eq(shows_update(), false)
+    checker._reset()
+    h.register({ { name = 'nothing' } })
+    check()
+    ui._flush()
+    h.ok(buffer_lines()[2]:find('^   nothing'), buffer_lines()[2])
+end)
 
 test('enter shows the changelog of an update in the details, and enter again shows the tasks', function()
     local remote = behind_by_three('log.nvim')
@@ -338,28 +381,8 @@ test(':Sarcina check lists the updates in the window and says which plugins have
     h.eq(tasks.snapshot().total, 0) -- the task list is left alone
 end)
 
-test('in the select view an update row has a pick box, and Space picks its plugin', function()
-    local remote = behind_by_three('pick.nvim')
-    h.register({ spec('pick.nvim', remote), { name = 'other' } })
-    ui.open()
-    check()
-    ui._flush()
-    vim.api.nvim_set_current_win(ui._winid)
-    local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
-    press('v')
-    h.ok(buffer_lines()[3]:find('^ ○  ↑ pick%.nvim'), buffer_lines()[3])
-    vim.api.nvim_win_set_cursor(ui._winid, { 3, 0 })
-    press('<Space>')
-    h.eq(window.marked(), { 'pick.nvim' })
-    h.ok(buffer_lines()[3]:find('^ ✔  ↑ pick%.nvim'), buffer_lines()[3])
-    -- The same plugin is picked in its section too.
-    local row = buffer_lines()[window.line('pick.nvim')]
-    h.ok(row:find('^ ✔ pick%.nvim'), row)
-    press('v')
-end)
-
 test(
-    'an update that moved a plugin takes it off the Updates list, and one that left it alone does not',
+    'an update that moved a plugin has no update left to show, and one that left it alone keeps it',
     function()
         local moved = behind_by_three('moved.nvim')
         local kept, kept_dir = behind_by_three('kept.nvim')
@@ -369,6 +392,7 @@ test(
             { name = 'kept.nvim', timing = 'later', spec = spec('kept.nvim', kept) },
         }
         h.register(vim.tbl_map(function(e) return e.spec end, resolved))
+        vim.o.columns, vim.o.lines = 200, 50
         ui.open()
         check()
         h.eq(vim.tbl_count(checker.state().updates), 2)
@@ -380,8 +404,22 @@ test(
         )
         h.ok(checker.update_of('kept.nvim'), 'a plugin left alone lost its update')
         ui._flush()
-        local text = table.concat(buffer_lines(), '\n')
-        h.ok(not text:find('↑ moved', 1, true) and text:find('↑ kept', 1, true), text)
+        -- The rows say what happened: one moved, no longer behind; one left alone, still behind.
+        local moved_row = buffer_lines()[window.line('moved.nvim')]
+        h.ok(moved_row:find('updated %x+ → %x+') and not moved_row:find('↑', 1, true), moved_row)
+        local kept_row = buffer_lines()[window.line('kept.nvim')]
+        h.ok(
+            kept_row:find('update skipped: local changes', 1, true) and kept_row:find('↑', 1, true),
+            kept_row
+        )
+        local function details_of(name)
+            vim.api.nvim_win_set_cursor(ui._winid, { window.line(name), 0 })
+            vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+            return details_text()
+        end
+        details_of('moved.nvim')
+        h.eq(shows_update(), false)
+        h.ok(details_of('kept.nvim'):find('update%s+%x+ · 3 commits behind'), details_text())
     end
 )
 

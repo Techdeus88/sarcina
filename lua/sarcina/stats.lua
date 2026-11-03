@@ -156,6 +156,25 @@ local function being_checked(name)
     return checker ~= nil and checker.state().looking[name] == true
 end
 
+-- Looking for an update and applying one are no part of loading, so they add nothing to the load time of a row.
+local NOT_LOADING = { update = true, check = true }
+
+-- The update a check found for the plugin, or nil. Like being_checked, it does not load the checker.
+local function update_found(name)
+    local checker = package.loaded['sarcina.checker']
+    return checker and checker.update_of(name) or nil
+end
+
+-- What the latest `update` of a plugin changed: it moved it, or left it alone because of changes of its own. An
+-- update that found nothing to do says nothing.
+local function change_of(latest)
+    local job = latest.update
+    local note = job and job.status == 'done' and job.note
+    if not note then return nil end
+    if note:find('→', 1, true) then return 'updated ' .. note end
+    if note:find('skipped', 1, true) then return 'update ' .. note end
+end
+
 local function row_of(name)
     local entry = registered[name]
     local jobs = track.jobs_of(name)
@@ -163,6 +182,8 @@ local function row_of(name)
     if #jobs == 0 then
         if being_checked(name) then
             row.state, row.detail = 'checking', 'checking for updates…'
+        else
+            row.update = update_found(name)
         end
         return row
     end
@@ -170,14 +191,16 @@ local function row_of(name)
     for _, job in ipairs(jobs) do
         latest[job.id] = job
     end
-    for _, job in pairs(latest) do
-        duration = duration + (job.duration or 0)
+    for id, job in pairs(latest) do
+        if not NOT_LOADING[id] then duration = duration + (job.duration or 0) end
     end
     row.state, row.detail = state_of(latest, jobs)
     row.task = row.state == 'loaded' and row.tasks or position(steps_of(entry.plan, latest))
     row.duration = duration > 0 and duration or nil
     if being_checked(name) and not ACTIVE[row.state] then
         row.state, row.detail = 'checking', 'checking for updates…'
+    elseif not ACTIVE[row.state] then
+        row.update, row.changed = update_found(name), change_of(latest)
     end
     return row
 end
@@ -186,7 +209,9 @@ end
 --- task 3 of 8), `detail` and `duration` in ms. `state` is pending, installing, building, updating, checking,
 --- loading, waiting (for its trigger), loaded, blocked or failed. A plugin whose remote a look for updates is
 --- asking is `checking` unless it is at work. An install of what is on disk and a build whose commit
---- did not change never show as work.
+--- did not change never show as work. A plugin that is not at work also carries what its latest check and
+--- update left: `update`, the commits a check found it is behind (`{ from, to, commits }`, see checker.lua),
+--- and `changed`, what an update did to it (`updated abc1234 → def5678`, or `update skipped: local changes`).
 function M.plugin(name)
     if registered[name] then return row_of(name) end
 end

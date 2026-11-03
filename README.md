@@ -34,7 +34,7 @@ vim.opt.rtp:prepend(path)
 require('sarcina').setup()
 ```
 
-`stable` is the latest release. Sarcina checks itself for updates before your plugins, and follows `stable` unless you pin it: a new release shows as `↑ sarcina` at the head of the [Updates](#updates) list, and `:Sarcina update sarcina` moves it there. Restart Neovim to run the new code. To stay on a release, or to follow every commit, pin Sarcina in `setup()`:
+`stable` is the latest release. Sarcina checks itself for updates before your plugins, and follows `stable` unless you pin it: a new release is named in the message of a check, and `:Sarcina update sarcina` moves it there. Restart Neovim to run the new code. To stay on a release, or to follow every commit, pin Sarcina in `setup()`:
 
 ```lua
 require('sarcina').setup({ pin = { tag = 'v0.1.0' } }) -- this release only
@@ -250,7 +250,7 @@ How the width is shared between the list and the details. The window is 80% of t
 
 | Value | Does |
 | --- | --- |
-| `true` (default) | opening the window checks Sarcina, then every plugin, for updates, and fills the [Updates](#updates) list. It skips the check when one of every plugin finished less than 5 minutes ago, and waits for a run of installs or updates to end |
+| `true` (default) | opening the window checks Sarcina, then every plugin, for updates, and the details of each plugin that has one show it (see [Updates](#updates)). It skips the check when one of every plugin finished less than 5 minutes ago, and waits for a run of installs or updates to end |
 | `false` | nothing is checked until `C` in the window or `:Sarcina check` |
 
 A check never moves a plugin; `:Sarcina update` does.
@@ -426,7 +426,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | `:Sarcina load [plugins]` | load the plugins that are on disk but have not loaded in this session. Nothing is cloned |
 | `:Sarcina sync` | `install`, and list the directories that are not in your specs |
 | `:Sarcina sync!` | the same, and delete those directories |
-| `:Sarcina check [plugins]` | look for updates in the background and list them in the window's Updates section, with a message when done. Nothing is changed |
+| `:Sarcina check [plugins]` | look for updates in the background; the details of a plugin that has one show it, and a message names them when done. Nothing is changed |
 | `:Sarcina update [plugins]` | check, ask, then move each plugin that has a newer commit to it, rebuild what moved, and write the lock file |
 | `:Sarcina delete <plugins>` | ask, then delete the named plugins from the plugins directory. One name or several |
 | `:Sarcina clean` | list the plugin directories that are not in your specs |
@@ -438,7 +438,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 `check` and `update` take plugin names, completed with Tab, and do every plugin of the manifest without any. They read your specs from disk, like `install`, and show up in the window as `checking` and `updating`.
 
-**`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. For a plugin that is somewhere else it fetches the commits after the one the plugin is at (`git fetch --shallow-since`), to list them, and leaves the checkout as it is. It runs outside the task list, so the rows keep their state, and its results go to the [Updates section](#updates) of the window; a message names the plugins that have an update. A check of named plugins keeps what an earlier check found for the others. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
+**`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. For a plugin that is somewhere else it fetches the commits after the one the plugin is at (`git fetch --shallow-since`), to list them, and leaves the checkout as it is. It runs outside the task list, so the rows keep their state, and its results show in the details of each plugin that has an update (see [Updates](#updates)); a message names them. A check of named plugins keeps what an earlier check found for the others. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
 
 **`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`delete`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are asked in the header (see [Messages](#messages)) and skipped with `setup({ confirm = false })` (see [Setup options](#setup-options)).
 
@@ -501,15 +501,15 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
 ╭──────────────────────────────────────────────────────────────────────────╮╭────────────────────────────────╮
 │                                                                          ││                                │
-│ Updates (1) <CR> changelog                                               ││nvim-treesitter                 │
-│    ↑ nvim-treesitter 0195cd6 feat(jinja)… · 1 commit behind  △ 1 breaking││                                │
-│                                                                          ││state     ✔ loaded              │
-│   plenary.nvim (110ms) now  3/3  tasks ✔  loaded                         ││tasks     4/4 tasks ✔ 40ms      │
-│   nvim-treesitter (40ms) later  4/4  tasks ✔  loaded                     ││timing    later                 │
-│   telescope.nvim (2.1s) later  1/6  tasks ▶  installing · Receiving obje…││src       https://github.com/   │
-│   avante.nvim (120ms) later  2/3  tasks ✘  failed · make: command not fo…││          nvim-treesitter/      │
-│   smart-splits.nvim (62ms) later  1/3  tasks ⊘  blocked · dependency ava…││          nvim-treesitter       │
-│   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││rev       a1b2c3d               │
+│   plenary.nvim (110ms) now  3/3  tasks ✔  loaded                         ││nvim-treesitter                 │
+│   nvim-treesitter (40ms) later  4/4  tasks ✔  loaded                     ││                                │
+│   telescope.nvim (2.1s) later  1/6  tasks ▶  installing · Receiving obje…││state     ✔ loaded              │
+│   avante.nvim (120ms) later  2/3  tasks ✘  failed · make: command not fo…││tasks     4/4 tasks ✔ 40ms      │
+│   smart-splits.nvim (62ms) later  1/3  tasks ⊘  blocked · dependency ava…││timing    later                 │
+│   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││src       https://github.com/   │
+│                                                                          ││          nvim-treesitter/      │
+│                                                                          ││          nvim-treesitter       │
+│                                                                          ││rev       a1b2c3d               │
 │                                                                          ││update    0195cd6 · 1 commit    │
 │                                                                          ││          behind  △ 1 breaking  │
 │                                                                          ││                                │
@@ -525,20 +525,19 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 
 **The header** has the total on the left, `Total: 6 plugins`, and on its right the work going on now: what kind (installing, updating, checking, building, or a background check for updates), how many of those jobs ended out of all of them, the plugin at it, a bar and a percentage. When nothing runs that side is empty. Below, on the left, are how many plugins loaded and how many did not, `● 3  ○ 3`; in the middle how far all their tasks have got together, `13/25 tasks`, the left numbers of the rows added up over their right numbers, so it counts up in real time; and on the right what the session did so far, each only once there is one: `⤓` plugins cloned, `⚙` builds that ran, `↑` updates that moved a plugin, `✕` plugin directories deleted, `✘` tasks that failed. **The footer** has on the left the picks of the select view, or `v to select plugins` when there is none, and the startup time on the right. On its bottom border, in the middle, are the keys of the list: `q` close, `=` the other view, `-` the other height, `v` select, `⏎` changelog, `c`/`C` check, `u`/`U` update, `i` install, `l` load, `d` delete, `^d`/`^u` scroll the details; in the select view, the keys that act on the picks. A footer too narrow for all of them drops keys from the end. The counts per timing are in `:Sarcina stats`.
 
-**The list** shows every plugin in one run, with no headers: first the plugins that load `now`, then the `later` ones, then the ones a trigger loads, and each row names its timing. Within a timing the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below the loaded ones of their timing in manifest order, and a row moves up when its plugin loads. A blank line at each end keeps the rows off the borders. The cursor rests only on rows of plugins: moving onto a blank line or the Updates heading takes it on, the way it moved, to the next plugin. The details always show the plugin of the row under the cursor, and nothing when there is none.
+**The list** shows every plugin in one run, with no headers: first the plugins that load `now`, then the `later` ones, then the ones a trigger loads, and each row names its timing. Within a timing the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below the loaded ones of their timing in manifest order, and a row moves up when its plugin loads. A blank line at each end keeps the rows off the borders. The cursor rests only on rows of plugins: moving onto a blank line takes it on, the way it moved, to the next plugin. The details always show the plugin of the row under the cursor, and nothing when there is none.
 
 ### Updates
 
-When the window opens it looks for updates in the background (see `check` under [Commands](#commands)). The Updates heading, the second line of the list, level with the name of the plugin over the details, says how it goes, and the updates it finds head the list:
+When the window opens it looks for updates in the background (see `check` under [Commands](#commands)). The list has no section for them: a plugin that is behind shows its update in its details, on the `update` line, which gives the commit it would move to, how many commits it is behind, and how many of them break something:
 
 ```
- Updates (1) ↻ checking… <CR> changelog
-    ↑ nvim-treesitter 0195cd6 feat(jinja)!: update parser and queries · 1 commit behind  △ 1 breaking
+update    0195cd6 · 1 commit behind  △ 1 breaking
 ```
 
-While the check runs the heading says `↻ checking…`. Each plugin that is behind gets a row as its answer comes in: the commit it would move to, the subject of the newest commit, how many commits it is behind, and how many of them break something. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. The arrow sits one cell in from the names of the rows below. The rows move with the cursor like the others, and in the select view (`v`) they have a pick box too: `Space` picks the plugin, here and in its own row. The details show the plugin with an `update` line. An `update` that moves a plugin, or finds it where it should be, takes it off the Updates list, so it shows only in its own row again; one that leaves it alone, such as for changes of its own, keeps it there. `<CR>` switches the details to the plugin's changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. A check that found nothing says `✔ up to date`, and remotes that could not be reached are counted in the heading. Without a check the list has no heading.
+While a plugin's remote is asked, its row says `checking for updates…`, and the header shows `↻ Checking for updates` with how far it got. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. `<CR>` switches the details of a plugin that has an update to its changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. An `update` that moves a plugin, or finds it where it should be, clears its update; one that leaves it alone, such as for changes of its own, keeps it. `:Sarcina check` also names the plugins that have an update in a message when it is done.
 
-**Sarcina itself** is checked first, on its own, before the plugins it manages: the directory its files run from, wherever that is (a bootstrap in your config often clones it into the plugins directory), followed on the `stable` branch, the latest release, or on what [`pin`](#pin) names. When it is behind, its update leads the list as `↑ sarcina …`, and its details say where it runs from and list the commits it would bring. `:Sarcina update` (or `U`, or `u` on its row) moves it like a plugin, and `:Sarcina update sarcina` moves only it; restart Neovim to run the new code. A checkout that is not a git clone is not checked. Looking ahead never cuts the history of a full clone: only the shallow clones Sarcina makes for plugins fetch from a date. `clean`, `delete` and the startup warning about directories no spec owns never count Sarcina's own directory as a plugin.
+**Sarcina itself** is checked first, on its own, before the plugins it manages: the directory its files run from, wherever that is (a bootstrap in your config often clones it into the plugins directory), followed on the `stable` branch, the latest release, or on what [`pin`](#pin) names. When it is behind, a check names it in its message, with the commit it would move to; the window shows nothing for it, since Sarcina is no row of the list. `:Sarcina update` (or `U`) moves it like a plugin, and `:Sarcina update sarcina` moves only it; restart Neovim to run the new code. A checkout that is not a git clone is not checked. Looking ahead never cuts the history of a full clone: only the shallow clones Sarcina makes for plugins fetch from a date. `clean`, `delete` and the startup warning about directories no spec owns never count Sarcina's own directory as a plugin.
 
 The check skips a window that opens less than 5 minutes after a check of every plugin finished, and a window that opens while plugins are being installed or updated checks once that run ends. `setup({ ui = { check_on_open = false } })` turns it off; then `C` in the list, or `:Sarcina check`, looks when you ask. Nothing moves until you run `update`.
 

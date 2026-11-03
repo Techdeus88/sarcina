@@ -6,7 +6,7 @@
 
 local M = {}
 
---- The name Sarcina has in the Updates list and for `:Sarcina update`.
+--- The name Sarcina has in the messages of a check and for `:Sarcina update`.
 M.name = 'sarcina'
 
 --- The directory to use instead of the one this file is in; false turns the self-check off. For tests.

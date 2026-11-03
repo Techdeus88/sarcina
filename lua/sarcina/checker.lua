@@ -1,5 +1,5 @@
 -- sarcina/checker.lua
--- Looks for updates in the background, for the Updates section of the window: for each installed plugin it
+-- Looks for updates in the background, for the details of the window: for each installed plugin it
 -- asks the remote where the plugin should be, and for the ones that are behind it fetches the commits in
 -- between (see executors.look_ahead). It runs outside the task engine, so the rows of the window keep their
 -- state, and it never moves a plugin; `:Sarcina update` does that.

@@ -107,7 +107,6 @@ local HEIGHTS = { regular = SHARE, extended = 0.95 }
 
 local entries = {} -- line number -> { kind = 'plugin', name = string }
 local line_of = {} -- plugin name -> line number
-local update_line_of = {} -- plugin name -> the line of its update
 local rows = {} -- plugin name -> the row as last drawn
 local names = {} -- plugin names in line order
 local selected = nil -- the plugin the details pane shows
@@ -319,6 +318,73 @@ local function status_message(row)
     return row.state .. ' · ' .. detail
 end
 
+local function short(commit) return commit:sub(1, 7) end
+
+local function breaking_count(commits)
+    local count = 0
+    for _, commit in ipairs(commits or {}) do
+        if commit.breaking then count = count + 1 end
+    end
+    return count
+end
+
+-- What an update says after the commit it goes to: how far behind the plugin is and how many of those commits
+-- break something.
+local function behind(info)
+    if not info.commits then return { { ' · update available' } } end
+    if #info.commits == 0 then return { { ' · moves back' } } end
+    local parts = { { ' · ' .. plural(#info.commits, 'commit') .. ' behind' } }
+    local broken = breaking_count(info.commits)
+    if broken > 0 then table.insert(parts, { '  △ ' .. broken .. ' breaking', 'SarcinaBreaking' }) end
+    return parts
+end
+
+-- What the latest update and the latest check left on the plugin, as parts, or nil when they left nothing:
+-- `updated abc1234 → def5678`, then `↑ def5678 · 3 commits behind  △ 1 breaking`.
+local function news_parts(row)
+    local parts = {}
+    if row.changed then table.insert(parts, { row.changed, 'SarcinaNote' }) end
+    if row.update then
+        if #parts > 0 then table.insert(parts, { ' · ', 'SarcinaNote' }) end
+        vim.list_extend(parts, { { '↑ ', 'SarcinaUpdate' }, { short(row.update.to), 'SarcinaRev' } })
+        vim.list_extend(parts, behind(row.update))
+    end
+    return #parts > 0 and parts or nil
+end
+
+-- `parts` cut to `max` columns, the part that runs over ending in an ellipsis.
+local function fit_parts(parts, max)
+    local cut, used = {}, 0
+    for _, part in ipairs(parts) do
+        local room = max - used
+        if room <= 0 then break end
+        local width = width_of(part[1])
+        if width <= room then
+            table.insert(cut, part)
+            used = used + width
+        else
+            table.insert(cut, { fit(part[1], room), part[2] })
+            break
+        end
+    end
+    return cut
+end
+
+-- What follows the tasks widget: the state and what it adds, then the news. A loaded plugin with news drops the
+-- bare word `loaded`, since the widget already says it.
+local function status_parts(row)
+    local message, news = status_message(row), news_parts(row)
+    local parts = {}
+    if not (news and row.state == 'loaded' and message == 'loaded') then
+        parts = { { message, HL[row.state] } }
+    end
+    if news then
+        if #parts > 0 then table.insert(parts, { ' · ', 'SarcinaNote' }) end
+        vim.list_extend(parts, news)
+    end
+    return parts
+end
+
 -- The three cells in front of a name: a plain indent, or in the select view a box that is checked for a pick.
 local function lead_parts(name)
     if not M.select_mode then return { { INDENT } } end
@@ -344,68 +410,9 @@ local function row_line(row)
     local left = view.list_w - parts_width(parts) - 1
     if left >= 4 then
         table.insert(parts, { ' ' })
-        table.insert(parts, { fit(status_message(row), left), HL[row.state] })
+        vim.list_extend(parts, fit_parts(status_parts(row), left))
     end
     return build_line(parts)
-end
-
-local function short(commit) return commit:sub(1, 7) end
-
-local function breaking_count(commits)
-    local count = 0
-    for _, commit in ipairs(commits or {}) do
-        if commit.breaking then count = count + 1 end
-    end
-    return count
-end
-
--- The heading of the Updates section while a check runs or after one that had something to check, the first
--- line of the list level with the name of the plugin over the details: `Updates (N)`, then that a check runs,
--- that nothing was found, how many remotes could not say, and the key for the changelog. nil for no heading.
-local function updates_title()
-    local check = checker().state()
-    if not (check.running or check.total > 0) then return nil end
-    local found = vim.tbl_count(check.updates)
-    local parts = { { ' ' }, { string.format('Updates (%d) ', found), 'SarcinaSection' } }
-    if check.running then
-        table.insert(parts, { '↻ checking… ', 'SarcinaNote' })
-    elseif found == 0 then
-        table.insert(parts, { '✔ up to date ', 'SarcinaDone' })
-    end
-    local failed = vim.tbl_count(check.failed)
-    if failed > 0 then table.insert(parts, { plural(failed, 'remote') .. ' failed ', 'SarcinaFailed' }) end
-    if found > 0 then table.insert(parts, { '<CR> changelog ', 'SarcinaNote' }) end
-    return parts
-end
-
--- What an update says after the commit it goes to: how far behind the plugin is and how many of those commits
--- break something.
-local function behind(info)
-    if not info.commits then return { { ' · update available' } } end
-    if #info.commits == 0 then return { { ' · moves back' } } end
-    local parts = { { ' · ' .. plural(#info.commits, 'commit') .. ' behind' } }
-    local broken = breaking_count(info.commits)
-    if broken > 0 then table.insert(parts, { '  △ ' .. broken .. ' breaking', 'SarcinaBreaking' }) end
-    return parts
-end
-
--- A row of the Updates section: `↑ name commit subject · N commits behind  △ N breaking`. The subject of the
--- newest commit takes what is left of the list, and goes when that is too little to say anything.
-local function update_line(name, info)
-    -- The arrow sits one cell in from the names of the rows below, and in the select view behind the pick box.
-    local head = lead_parts(name)
-    vim.list_extend(head, {
-        { ' ' },
-        { '↑ ', 'SarcinaUpdate' },
-        { name, 'SarcinaName' },
-        { ' ' },
-        { short(info.to), 'SarcinaRev' },
-    })
-    local tail = behind(info)
-    local newest = info.commits and info.commits[1]
-    local room = view.list_w - parts_width(head) - parts_width(tail) - 1
-    if newest and room >= 8 then table.insert(head, { ' ' .. fit(newest.subject, room), 'SarcinaCommit' }) end
-    return build_line(vim.list_extend(head, tail))
 end
 
 -- The rows of `list` in the order the list shows them: the plugins that load now, then the ones that load
@@ -430,33 +437,16 @@ local function shown_order(list)
     return vim.tbl_map(function(row) return row.name end, ordered(list))
 end
 
--- The lines of the list: the updates a check found, under the Updates heading, then every plugin in one run,
--- a blank line above them when there are updates. Fills `entries`, `line_of`, `rows` and `names`.
+-- The lines of the list: every plugin in one run, between a blank line above and one below so the rows do not
+-- touch the borders. Fills `entries`, `line_of`, `rows` and `names`.
 local function layout(list)
     local lines = {}
     local function add(line, entry)
         table.insert(lines, line)
         entries[#lines] = entry
     end
-    -- A blank line above the content and one below it, so it does not touch the borders.
     add(build_line({}), { kind = 'blank' })
-    local check = checker().state()
-    local title = updates_title()
-    if title then add(build_line(title), { kind = 'section' }) end
-    local found = {}
-    for _, row in ipairs(list) do
-        if check.updates[row.name] then table.insert(found, row.name) end
-    end
-    -- Sarcina is no row of the list, so its own update leads the list (see self.lua).
-    local own = require('sarcina.self').name
-    if check.updates[own] and not vim.tbl_contains(found, own) then table.insert(found, 1, own) end
-    for _, name in ipairs(found) do
-        add(update_line(name, check.updates[name]), { kind = 'update', name = name })
-        update_line_of[name] = #lines
-    end
-    local plugins = ordered(list)
-    if #plugins > 0 and #lines > 1 then add(build_line({}), { kind = 'blank' }) end
-    for _, row in ipairs(plugins) do
+    for _, row in ipairs(ordered(list)) do
         table.insert(names, row.name)
         rows[row.name] = row
         add(row_line(row), { kind = 'plugin', name = row.name })
@@ -775,13 +765,13 @@ end
 --- is `stats.plugins()` when the caller already has it.
 function M.draw(bufs, list)
     list = list or stats.plugins()
-    entries, line_of, rows, names, update_line_of = {}, {}, {}, {}, {}
+    entries, line_of, rows, names = {}, {}, {}, {}
     measure()
     local lines = layout(list)
     vim.api.nvim_buf_clear_namespace(bufs.list, NS, 0, -1)
     put(bufs.list, NS, 1, vim.api.nvim_buf_line_count(bufs.list), #lines > 0 and lines or { build_line({}) })
     put_chrome(bufs)
-    if not (selected and (line_of[selected] or update_line_of[selected])) then selected = names[1] end
+    if not (selected and line_of[selected]) then selected = names[1] end
     for name in pairs(marked) do
         if not line_of[name] then marked[name] = nil end
     end
@@ -999,36 +989,6 @@ local function changelog_lines(commits)
     return lines
 end
 
--- The details of Sarcina's own update: where it runs from, its commit, the update and the commits it brings.
--- What Sarcina follows, in words: `branch stable`, or the pin of setup().
-local function own_pin()
-    local entry = require('sarcina.self').entry()
-    local pin = entry and require('sarcina.pin').of(entry.spec)
-    return pin and require('sarcina.pin').describe(pin) or ''
-end
-
-local function own_lines(info)
-    local dir = require('sarcina.self').dir()
-    local function fact(key, value, group)
-        return build_line({ { pad(key, KEY_W + 1), 'SarcinaTag' }, { value, group } })
-    end
-    local lines = {
-        fact('state', '↑ update available', 'SarcinaUpdate'),
-        fact('path', vim.fn.fnamemodify(dir, ':~')),
-        fact('rev', rev_of(require('sarcina.self').name, dir)),
-        fact('pin', own_pin()),
-        build_line(
-            vim.list_extend(
-                { { pad('update', KEY_W + 1), 'SarcinaTag' }, { short(info.to), 'SarcinaRev' } },
-                behind(info)
-            )
-        ),
-        fact('restart', 'after :Sarcina update, to load it', 'SarcinaNote'),
-        build_line({}),
-    }
-    return vim.list_extend(lines, changelog_lines(info.commits or {}))
-end
-
 --- Draws the details of the selected plugin in `buf`: its facts, then one line per task of its plan with
 --- the task's own time. Returns the plugin's name, or nil when nothing is selected.
 function M.draw_details(buf)
@@ -1075,8 +1035,6 @@ function M.draw_details(buf)
             vim.list_extend(lines, task_lines(selected))
         end
     end
-    local own = not row and selected == require('sarcina.self').name and checker().update_of(selected)
-    if own then lines = own_lines(own) end
     if #lines > 0 then
         -- A blank line above the name of the plugin, one under it, and one below the details, as in the list.
         table.insert(lines, 1, build_line({}))
@@ -1086,7 +1044,7 @@ function M.draw_details(buf)
     end
     vim.api.nvim_buf_clear_namespace(buf, DETAIL_NS, 0, -1)
     put(buf, DETAIL_NS, 1, vim.api.nvim_buf_line_count(buf), #lines > 0 and lines or { build_line({}) })
-    return (row or own) and selected or nil
+    return row and selected or nil
 end
 
 return M

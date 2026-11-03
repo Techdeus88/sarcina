@@ -110,39 +110,22 @@ test('a check of everything looks at Sarcina first, alone, and then at the plugi
     h.eq(h.git(dir, 'rev-parse', '--is-shallow-repository'), 'false')
 end)
 
-test(
-    "the window leads the Updates list with Sarcina's own update, and its details show what it brings",
-    function()
-        local remote = own_checkout(1)
-        h.register({ { name = 'a', tasks = { h.lua('rtp', h.noop) } } })
-        vim.o.columns, vim.o.lines = 200, 50
-        ui.open()
-        checker.run()
-        finished()
-        ui._flush()
-        local lines = vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false)
-        h.ok(
-            lines[3]:find(
-                '↑ sarcina ' .. h.head(remote):sub(1, 7) .. ' feat: sarcina 1 · 1 commit behind',
-                1,
-                true
-            ),
-            lines[3]
-        )
-        h.eq(window.entry_at(3), { kind = 'update', name = 'sarcina' })
-        vim.api.nvim_set_current_win(ui._winid)
-        vim.api.nvim_win_set_cursor(ui._winid, { 3, 0 })
-        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-        h.eq(window.selected(), 'sarcina')
-        local text = table.concat(vim.api.nvim_buf_get_lines(ui._detail_bufnr, 0, -1, false), '\n')
-        h.ok(text:find('state%s+↑ update available'), text)
-        h.ok(text:find('Changelog\n   %x+ feat: sarcina 1'), text)
-        -- A redraw keeps the cursor and the details on it.
-        ui._full = true
-        ui._flush()
-        h.eq(window.selected(), 'sarcina')
-    end
-)
+test("Sarcina's own update is found by a check but takes no line in the window", function()
+    own_checkout(1)
+    h.register({ { name = 'a', tasks = { h.lua('rtp', h.noop) } } })
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    checker.run()
+    finished()
+    ui._flush()
+    local update = checker.update_of('sarcina')
+    h.ok(update, 'the check did not find the update of Sarcina')
+    h.eq(vim.tbl_map(function(c) return c.subject end, update.commits), { 'feat: sarcina 1' })
+    local text = table.concat(vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false), '\n')
+    h.eq(text:find('sarcina', 1, true), nil)
+    h.eq(window.line('sarcina'), nil)
+    h.eq(window.entry_at(2), { kind = 'plugin', name = 'a' })
+end)
 
 test('update moves Sarcina to its remote like a plugin, and it takes no row in the window', function()
     local remote, dir = own_checkout(1)
@@ -249,22 +232,6 @@ test('a pin takes Sarcina to that tag, to the newest version that matches, or to
     updater.update({}, { 'sarcina' })
     h.ok(tasks.wait(15000), 'the update did not finish')
     h.eq(h.head(dir), h.git(remote, 'rev-parse', 'v1.1.0^{commit}'))
-end)
-
-test('the details of an update of Sarcina say what it follows', function()
-    local remote = own_checkout(1)
-    h.git(remote, 'tag', 'v9.9.9')
-    self.pin = { tag = 'v9.9.9' }
-    h.register({ { name = 'a', tasks = { h.lua('rtp', h.noop) } } })
-    vim.o.columns, vim.o.lines = 200, 50
-    ui.open()
-    own_update()
-    ui._flush()
-    vim.api.nvim_set_current_win(ui._winid)
-    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
-    vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
-    local text = table.concat(vim.api.nvim_buf_get_lines(ui._detail_bufnr, 0, -1, false), '\n')
-    h.ok(text:find('pin%s+tag v9.9.9'), text)
 end)
 
 test('with no git checkout to look at, there is no self-check', function()

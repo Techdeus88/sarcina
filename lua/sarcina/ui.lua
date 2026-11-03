@@ -171,7 +171,7 @@ end
 local function follow(opened, dirty)
     local before = window().selected()
     if not opened and vim.api.nvim_get_current_win() == M._winid then
-        -- A row of the same plugin, such as its update, keeps the cursor.
+        -- The cursor goes back to the row of the plugin it was on, which may have moved.
         local at = window().entry_at(vim.api.nvim_win_get_cursor(M._winid)[1])
         local line = window().line(before)
         if line and not (at and at.name == before) then vim.api.nvim_win_set_cursor(M._winid, { line, 0 }) end
@@ -415,8 +415,8 @@ local function lock_list(buf)
     end
 end
 
--- On the first row the cursor can rest on, the lines above it stay in view: the blank line at the top and the
--- Updates heading. On the last row, the lines below it. Vim scrolls only as far as the cursor, which hid them.
+-- On the first row the cursor can rest on, the blank line above it stays in view. On the last row, the blank
+-- line below it. Vim scrolls only as far as the cursor, which hid them.
 local function show_ends(lnum)
     local first, last = window().ends()
     local view = vim.api.nvim_win_call(M._winid, vim.fn.winsaveview)
@@ -597,7 +597,7 @@ end
 
 -- A job changed: its plugin's row needs a redraw, and real work or a failure may open the window.
 function M._on_task(job)
-    -- A plugin an update moved, or found where it should be, leaves the Updates list for its section.
+    -- A plugin an update moved, or found where it should be, has no update left to show.
     local checker = package.loaded['sarcina.checker']
     if checker and job.id == 'update' and job.status == 'done' then
         local note = job.note or ''
@@ -747,7 +747,7 @@ function M.dismiss()
     M.close()
 end
 
---- Looks for updates in the background (see checker.lua); the window shows them in its Updates section.
+--- Looks for updates in the background (see checker.lua); the details of a plugin show its update.
 --- `on_open` is for the check the window starts when it opens: it skips a check that finished a moment ago, and
 --- while plugins are being installed or updated it waits for that run to end.
 function M.check(on_open)

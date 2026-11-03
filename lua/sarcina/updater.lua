@@ -142,7 +142,7 @@ local function run(mode, resolved, names, finish)
         local spec = vim.tbl_extend('force', {}, entry.spec, { tasks = list })
         return { name = entry.name, timing = entry.timing, spec = spec }
     end, resolved)
-    -- Sarcina is no row of the window: its update shows in the Updates list and the header.
+    -- Sarcina is no row of the window: its update shows in the messages and the header.
     stats.register(vim.tbl_filter(function(entry) return not entry.spec.self end, entries))
     if #missing > 0 then
         ui.emit(
@@ -171,6 +171,9 @@ local function run(mode, resolved, names, finish)
         string.format('%s %s...', mode == 'check' and 'Checking' or 'Updating', counted(vim.tbl_keys(plans)))
     )
     tasks.run_all(function()
+        -- The plans of the run were for its progress. A row goes back to the plan of its spec, so a run that
+        -- changed nothing leaves it as it was.
+        stats.register(vim.tbl_filter(function(entry) return not entry.spec.self end, resolved))
         local jobs = tasks.snapshot().jobs
         if finish then return finish(jobs) end
         local text, level = M.summarize(mode, jobs)
@@ -207,8 +210,8 @@ local function look_summary(state, entries)
     return table.concat(parts, ' '), #failed > 0 and 'warn' or 'info'
 end
 
---- Look for updates in the background (see checker.lua), without the task list: the window lists them in its
---- Updates section, and a message says which plugins have one when it is done. Nothing moves. `names` picks
+--- Look for updates in the background (see checker.lua), without the task list: the details of a plugin show its
+--- update, and a message says which plugins have one when it is done. Nothing moves. `names` picks
 --- plugins, none picks all; a look at some keeps what an earlier one found for the others.
 function M.look(resolved, names)
     names = names or {}
