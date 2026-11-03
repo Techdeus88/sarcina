@@ -16,12 +16,14 @@ M.max_concurrent = 8
 M.fresh_for = 5 * 60 * 1000
 
 -- `updates` maps a plugin name to what look_ahead said about it: `{ from, to, commits }`.
-local state = { running = false, checked = 0, total = 0, updates = {}, failed = {}, finished = nil }
+local state =
+    { running = false, checked = 0, total = 0, own = false, updates = {}, failed = {}, finished = nil }
 local last_full -- when a check of every plugin last finished, from vim.uv.now()
 
 --- Whether a check is running, how far it got (`checked` of `total`), what it found so far (`updates`, by
 --- plugin name), the plugins whose remote could not say (`failed`, name -> why), and when it last finished
---- (`finished`, from vim.uv.now()). Read it, do not change it.
+--- (`finished`, from vim.uv.now()). `own` is whether Sarcina is one of the `total`, checked first. Read it, do not
+--- change it.
 function M.state() return state end
 
 --- What the last check found for a plugin, or nil.
@@ -72,6 +74,7 @@ function M.run(entries, on_done, opts)
         running = true,
         checked = 0,
         total = #queue + (first and 1 or 0),
+        own = first and true or false,
         updates = updates,
         failed = failed,
         finished = nil,
@@ -129,7 +132,8 @@ end
 
 --- Forget what was found. For tests.
 function M._reset()
-    state = { running = false, checked = 0, total = 0, updates = {}, failed = {}, finished = nil }
+    state =
+        { running = false, checked = 0, total = 0, own = false, updates = {}, failed = {}, finished = nil }
     last_full = nil
 end
 

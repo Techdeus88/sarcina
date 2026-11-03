@@ -17,10 +17,22 @@ local function text(value) return type(value) == 'string' and value ~= '' and va
 
 local function is_range(value) return type(value) == 'table' and type(value.has) == 'function' end
 
+-- Whether `range` holds one version. Neovim 0.11 writes `1.2.3` as from 1.2.3 up to 1.2.4, without it; 0.12 as
+-- from and to 1.2.3.
+local function exact(range)
+    local from, to = range.from, range.to
+    if vim.version.eq(from, to) then return true end
+    return from.prerelease == nil
+        and to.prerelease == nil
+        and to.major == from.major
+        and to.minor == from.minor
+        and to.patch == from.patch + 1
+end
+
 local function range_text(range)
-    local from, to = tostring(range.from), range.to and tostring(range.to)
-    if not to then return '>=' .. from end
-    return from == to and '=' .. from or '>=' .. from .. ' <' .. to
+    local from = tostring(range.from)
+    if not range.to then return '>=' .. from end
+    return exact(range) and '=' .. from or '>=' .. from .. ' <' .. tostring(range.to)
 end
 
 -- vim.version.range() takes 'b516f20b' for 516.0.0, so a string has to start like a range to be one.

@@ -14,6 +14,21 @@ local M = {}
 
 local PAST = { check = 'checked', update = 'updated' }
 
+-- How many of your plugins `names` holds, with Sarcina named apart, since it is none of them: `Sarcina and 49
+-- plugins`, `2 plugins`, `Sarcina`.
+local function counted(names)
+    local own, plugins = false, 0
+    for _, name in ipairs(names) do
+        if require('sarcina.self').named(name) then
+            own = true
+        else
+            plugins = plugins + 1
+        end
+    end
+    if not own then return ui.plural(plugins, 'plugin') end
+    return plugins > 0 and 'Sarcina and ' .. ui.plural(plugins, 'plugin') or 'Sarcina'
+end
+
 -- The entries of `resolved` that `names` pick, in the resolver's order, or nil after saying which name is
 -- not a plugin. No names picks them all.
 local function select(resolved, names)
@@ -74,7 +89,7 @@ end
 --- What a finished run says, and at what level: the plugins that have an update (check) or got one (update),
 --- those that were left alone, and those that failed.
 function M.summarize(mode, jobs)
-    local moved, left, failed, current = {}, {}, {}, 0
+    local moved, moved_names, left, failed, current = {}, {}, {}, {}, 0
     for _, job in ipairs(jobs) do
         if job.id == mode then
             local note = job.note or ''
@@ -86,15 +101,17 @@ function M.summarize(mode, jobs)
                 table.insert(left, job.plugin .. ' (' .. note .. ')')
             elseif job.status == 'done' then
                 table.insert(moved, job.plugin .. ' ' .. note:gsub('^update available ', ''))
+                table.insert(moved_names, job.plugin)
             end
         end
     end
     local parts = {}
     if #moved > 0 then
         local head = mode == 'check' and ui.plural(#moved, 'update') .. ' available: '
-            or 'Updated ' .. ui.plural(#moved, 'plugin') .. ': '
+            or 'Updated ' .. counted(moved_names) .. ': '
         table.insert(parts, head .. table.concat(moved, ', '))
-        table.insert(parts, mode == 'check' and 'Run :Sarcina update.' or 'Restart Neovim to load them.')
+        local restart = 'Restart Neovim to load ' .. (#moved == 1 and 'it.' or 'them.')
+        table.insert(parts, mode == 'check' and 'Run :Sarcina update.' or restart)
     elseif #left == 0 and #failed == 0 then
         table.insert(parts, current == 0 and 'No plugin to ' .. mode or 'Everything is up to date.')
     end
@@ -151,11 +168,7 @@ local function run(mode, resolved, names, finish)
     end
     ui.emit(
         'info',
-        string.format(
-            '%s %s...',
-            mode == 'check' and 'Checking' or 'Updating',
-            ui.plural(vim.tbl_count(plans), 'plugin')
-        )
+        string.format('%s %s...', mode == 'check' and 'Checking' or 'Updating', counted(vim.tbl_keys(plans)))
     )
     tasks.run_all(function()
         local jobs = tasks.snapshot().jobs
@@ -223,7 +236,10 @@ function M.look(resolved, names)
         ui.emit('warn', 'Local plugins are not checked: ' .. table.concat(local_plugins, ', ') .. '.')
     end
     if #wanted == 0 then return end
-    ui.emit('info', 'Checking ' .. ui.plural(#wanted, 'plugin') .. '...')
+    ui.emit(
+        'info',
+        'Checking ' .. counted(vim.tbl_map(function(entry) return entry.name end, wanted)) .. '...'
+    )
     checker.run(wanted, function(state)
         local text, level = look_summary(state, wanted)
         ui.emit(level, text)
@@ -257,7 +273,7 @@ function M.update(resolved, names)
             local text, level = M.summarize('check', jobs)
             return ui.emit(level, text)
         end
-        local prompt = 'Update ' .. ui.plural(#moving, 'plugin') .. '?\n' .. table.concat(lines, '\n')
+        local prompt = 'Update ' .. counted(moving) .. '?\n' .. table.concat(lines, '\n')
         confirm.ask(prompt, function(yes)
             if not yes then return ui.emit('info', 'Nothing updated') end
             run('update', resolved, moving)

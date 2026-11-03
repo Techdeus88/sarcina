@@ -34,7 +34,8 @@ end
 -- Only autocmds that appeared since `seen` run again, so other plugins' handlers never fire twice.
 local function replay_autocmds(event, args, seen)
     for _, au in ipairs(vim.api.nvim_get_autocmds({ event = event })) do
-        local applies = au.buflocal and au.buf == args.buf
+        -- Neovim 0.11 names the buffer `buffer`; 0.12 adds `buf`.
+        local applies = au.buflocal and (au.buf or au.buffer) == args.buf
             or not au.buflocal and pattern_matches(au.pattern, args.match)
         if applies and not seen[autocmd_key(au)] then
             if type(au.callback) == 'function' then

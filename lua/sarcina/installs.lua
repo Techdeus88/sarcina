@@ -34,8 +34,7 @@ end
 function M.record(name, ms)
     cache = read()
     cache[name] = { ms = math.floor(ms * 10 + 0.5) / 10, at = os.time() }
-    local ok, text = pcall(vim.json.encode, cache, { indent = '  ', sort_keys = true })
-    if not ok then text = vim.json.encode(cache) end
+    local text = require('sarcina.json').encode(cache)
     local path = paths.installs_file()
     vim.fn.mkdir(vim.fn.fnamemodify(path, ':h'), 'p')
     local file = io.open(path .. '.tmp', 'w')
@@ -55,8 +54,7 @@ function M.forget(names)
         end
     end
     if not changed then return end
-    local ok, text = pcall(vim.json.encode, cache, { indent = '  ', sort_keys = true })
-    if not ok then text = vim.json.encode(cache) end
+    local text = require('sarcina.json').encode(cache)
     local path = paths.installs_file()
     local file = io.open(path .. '.tmp', 'w')
     if not file then return end

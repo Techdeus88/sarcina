@@ -29,6 +29,10 @@ function M.dir()
     return vim.fs.normalize(vim.fn.fnamemodify(source, ':p:h:h:h'))
 end
 
+--- Whether the job or entry `name` is Sarcina itself, which counts apart from your plugins: Sarcina has no row,
+--- so a plugin of yours with the same name still counts as one.
+function M.named(name) return name == M.name and require('sarcina.stats').plugin(name) == nil end
+
 --- Whether `dir` is Sarcina's own directory, links resolved.
 function M.is(dir)
     local own = M.dir()

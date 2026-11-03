@@ -26,7 +26,9 @@ local function run_child(name, task, before_startup, probe)
         string.format('tasks.enqueue(%q, { tasks = { %s } })', name, task),
         'tasks.run_all()',
         before_startup and 'tasks.wait(5000)' or '',
-        "vim.api.nvim_create_autocmd('VimEnter', { callback = function()",
+        -- Nested, so a probe that edits a file gets its filetype: before Neovim 0.13 a command in an autocmd fires
+        -- no autocmds of its own otherwise.
+        "vim.api.nvim_create_autocmd('VimEnter', { nested = true, callback = function()",
         '    tasks.wait(5000)',
         probe and ('    _G.probe_value = (function() ' .. probe .. ' end)()') or '',
         '    io.stdout:write(vim.json.encode({ main = vim.g.main_ran, after = vim.g.after_ran, built = vim.g.built, count = vim.g.main_count, probe = _G.probe_value }))',

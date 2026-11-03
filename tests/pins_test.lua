@@ -30,6 +30,19 @@ test('a version that is a range asks for the newest tag inside it', function()
 end)
 
 test(
+    'one version reads the same as Neovim 0.11 and 0.12 write it, so its lock key does not change',
+    function()
+        local function range(from, to)
+            return { from = vim.version.parse(from), to = vim.version.parse(to), has = function() end }
+        end
+        -- 0.11 bounds 1.2.3 by the next patch, 0.12 by itself.
+        h.eq(pins.of({ version = range('1.2.3', '1.2.4') }).value, '=1.2.3')
+        h.eq(pins.of({ version = range('1.2.3', '1.2.3') }).value, '=1.2.3')
+        h.eq(pins.of({ version = range('1.2.3', '1.3.0') }).value, '>=1.2.3 <1.3.0')
+    end
+)
+
+test(
     'a version that is not a range is a commit when it looks like one, and a branch or tag name otherwise',
     function()
         h.eq(of({ version = 'b516f20b' }), { 'commit', 'b516f20b' })

@@ -34,8 +34,7 @@ end
 
 -- Writes through a temporary file, so a crash cannot leave half of it. Warns once when it cannot.
 local function write(data)
-    local ok, text = pcall(vim.json.encode, data, { indent = '  ', sort_keys = true })
-    if not ok then text = vim.json.encode(data) end
+    local text = require('sarcina.json').encode(data)
     local path = paths.lock_file()
     vim.fn.mkdir(vim.fn.fnamemodify(path, ':h'), 'p')
     -- Replacing a file that could not be read loses its pins, so keep a copy and say so.

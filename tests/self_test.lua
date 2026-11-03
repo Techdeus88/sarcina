@@ -1,4 +1,5 @@
 local checker = require('sarcina.checker')
+local confirm = require('sarcina.confirm')
 local executors = require('sarcina.executors')
 local h = require('helpers')
 local installer = require('sarcina.installer')
@@ -150,7 +151,70 @@ test('update moves Sarcina to its remote like a plugin, and it takes no row in t
     h.ok(tasks.wait(15000), 'the update did not finish')
     h.eq(h.head(dir), h.head(remote))
     h.eq(stats.plugin('sarcina'), nil)
-    h.ok(h.notified('Updated 1 plugin: sarcina'), vim.inspect(h.notes))
+    h.ok(h.notified('Updated Sarcina: sarcina '), vim.inspect(h.notes))
+end)
+
+-- Sarcina one commit behind and the plugin `name` one commit behind, both cloned. Returns what to hand the updater.
+local function own_and_plugin(name)
+    own_checkout(1)
+    local remote = h.upstream()
+    vim.fn.system({ 'git', 'clone', '-q', '--depth', '1', 'file://' .. remote, paths.install(name) })
+    commit(remote, 'fix: ' .. name)
+    local resolved = require('sarcina.resolver').resolve({ { name = name, repo = 'file://' .. remote } })
+    h.register({ { name = name, tasks = { h.lua('rtp', h.noop) } } })
+    return resolved
+end
+
+test('the messages count your plugins and name Sarcina apart, since it is none of them', function()
+    local resolved = own_and_plugin('counted.nvim')
+    updater.check(resolved)
+    h.ok(tasks.wait(15000), 'the check did not finish')
+    h.ok(h.notified('Checking Sarcina and 1 plugin...'), vim.inspect(h.notes))
+    h.ok(not h.notified('2 plugins'), vim.inspect(h.notes))
+    updater.look(resolved)
+    finished()
+    h.ok(h.notified('Checking Sarcina and 1 plugin...'), vim.inspect(h.notes))
+    local asked
+    local ask, enabled = confirm.ask, confirm.enabled
+    confirm.enabled, confirm.ask = true, function(prompt) asked = prompt end
+    local ok, err = pcall(function()
+        updater.update(resolved)
+        h.ok(tasks.wait(15000), 'the check did not finish')
+    end)
+    confirm.enabled, confirm.ask = enabled, ask
+    assert(ok, err)
+    h.ok(vim.startswith(asked or '', 'Update Sarcina and 1 plugin?\n'), asked)
+    h.notes = {}
+    ui._messages = h.notes
+    updater.update(resolved, { 'counted.nvim' })
+    h.ok(tasks.wait(15000), 'the update did not finish')
+    h.ok(h.notified('Updating 1 plugin...'), vim.inspect(h.notes))
+    h.ok(h.notified('Updated 1 plugin: counted.nvim'), vim.inspect(h.notes))
+    h.ok(h.notified('Restart Neovim to load it.'), vim.inspect(h.notes))
+end)
+
+test('the progress in the header counts your plugins and adds Sarcina apart', function()
+    local resolved = own_and_plugin('held.nvim')
+    local look_ahead = executors.look_ahead
+    local release
+    executors.look_ahead = function(at, pin, cb)
+        if at == self.root then return look_ahead(at, pin, cb) end
+        release = function() look_ahead(at, pin, cb) end
+    end
+    vim.o.columns, vim.o.lines = 200, 50
+    local ok, err = pcall(function()
+        ui.open()
+        updater.look(resolved)
+        h.ok(vim.wait(5000, function() return release ~= nil end, 20), 'the plugin was never looked at')
+        ui._full = true
+        ui._flush()
+        local first = vim.api.nvim_buf_get_lines(ui._header_bufnr, 0, 1, false)[1]
+        h.ok(first:find('↻ Checking for updates 0/1 plugin + Sarcina', 1, true), first)
+        release()
+        finished()
+    end)
+    executors.look_ahead = look_ahead
+    assert(ok, err)
 end)
 
 test('without a pin Sarcina follows stable, the latest release, and not what main has past it', function()

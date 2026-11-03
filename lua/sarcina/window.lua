@@ -515,34 +515,49 @@ local BAR_W = 10
 -- the plugin at it, a bar and how far along, within `room` columns. A background check for updates counts too.
 -- Nothing when idle.
 local function activity_parts(room)
-    local kind, finished, total, current
+    local own_name = require('sarcina.self').named
+    -- `own` is whether Sarcina is part of the work, and `own_ended` whether its part is done: it counts apart
+    -- from your plugins.
+    local kind, finished, total, current, own, own_ended
     local jobs = require('sarcina.tasks').snapshot().jobs
     for _, candidate in ipairs(ACTIVITY) do
-        local ended, all, running = 0, 0, nil
+        local ended, all, running, mine, mine_ended = 0, 0, nil, false, false
         for _, job in ipairs(jobs) do
             if job.id == candidate.id and job.status ~= 'skipped' then
-                all = all + 1
-                if job.status == 'done' or job.status == 'failed' then ended = ended + 1 end
+                local over = job.status == 'done' or job.status == 'failed'
+                if own_name(job.plugin) then
+                    mine, mine_ended = true, over
+                else
+                    all = all + 1
+                    if over then ended = ended + 1 end
+                end
                 if job.status == 'running' then running = job.plugin end
             end
         end
         if running then
-            kind, finished, total, current = candidate, ended, all, running
+            kind, finished, total, current, own, own_ended = candidate, ended, all, running, mine, mine_ended
             break
         end
     end
     if not kind then
         local check = checker().state()
         if not check.running then return {} end
-        kind, finished, total = { icon = '↻', label = 'Checking for updates' }, check.checked, check.total
+        kind = { icon = '↻', label = 'Checking for updates' }
+        -- Sarcina is checked first, on its own, so the first answer is its.
+        own, own_ended = check.own, check.own and check.checked > 0
+        local skip = own and 1 or 0
+        finished, total = math.max(check.checked - skip, 0), check.total - skip
     end
-    local share = total > 0 and finished / total or 0
+    local done_all = finished + (own_ended and 1 or 0)
+    local total_all = total + (own and 1 or 0)
+    local share = total_all > 0 and done_all / total_all or 0
     local filled = math.floor(share * BAR_W + 0.5)
-    local head = {
-        { kind.icon .. ' ' .. kind.label .. ' ', 'SarcinaRunning' },
-        { string.format('%d/%d', finished, total), 'SarcinaStepTime' },
-        { ' ' .. (total == 1 and 'plugin' or 'plugins'), 'SarcinaNote' },
-    }
+    local head = { { kind.icon .. ' ' .. kind.label .. ' ', 'SarcinaRunning' } }
+    if total > 0 then
+        table.insert(head, { string.format('%d/%d', finished, total), 'SarcinaStepTime' })
+        table.insert(head, { ' ' .. (total == 1 and 'plugin' or 'plugins'), 'SarcinaNote' })
+    end
+    if own then table.insert(head, { total > 0 and ' + Sarcina' or 'Sarcina', 'SarcinaNote' }) end
     local name = current and { { ' · ' .. current, 'SarcinaName' } } or {}
     local bar = {
         { '  ' },
