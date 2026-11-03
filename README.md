@@ -38,7 +38,7 @@ lua/sarcina/
 require('sarcina').setup()
 ```
 
-Installed plugins with `load = 'now'` load inside `setup()`, in the order received, dependencies first. Everything else runs in the background once the UI is up, and `require('sarcina.tasks').wait()` blocks until it is done. See [When plugins load](#when-plugins-load).
+Installed plugins with `load = 'now'` load inside `setup()`, in the order received, dependencies first. Everything else runs in the background once the UI is up, and `require('sarcina.tasks').wait()` blocks until it is done. See [When plugins load](#when-plugins-load), and [Setup options](#setup-options) for what `setup()` takes.
 
 A spec is a table in any file under `lua/plugins/`. `owner/repo` as the first entry expands to a GitHub URL.
 
@@ -107,6 +107,109 @@ end,
 A function `build` finds the plugin on `runtimepath`, so it can `require` the plugin's modules and call its autoload functions, but the plugin's `plugin/` files are not sourced until the `rtp` task, after the build. A plugin whose `plugin/` files load a native binary, such as `fff.nvim` or `blink.cmp`, therefore does not run before its build has made the binary. An Ex command `build` (`build = ':TSUpdate'`) does source them first, because the command comes from there. Builds always run after the UI is up, even for a `now` plugin.
 
 Without `main`, sarcina matches the plugin name, then the repo name, against the modules in the plugin's `lua/` directory, ignoring case, punctuation and `nvim` affixes. A lone module wins by default. If it cannot tell, the load task fails with the list of modules and asks you to set `main`.
+
+## Setup options
+
+`setup()` takes three keys: `spec_paths`, `confirm` and `ui`. Every one is optional, and `setup()` with no table is the same as this:
+
+```lua
+require('sarcina').setup({
+    spec_paths = nil, -- more directories of specs, on top of lua/plugins
+    confirm = true, -- ask before update and delete
+    ui = {
+        show = 'auto', -- when the window opens by itself
+        view = 'main', -- the list 70%, the details 30%
+        height = 'regular', -- 80% of the editor tall
+        rounded = true, -- rounded ends on the tasks widget
+        check_on_open = true, -- look for updates when the window opens
+    },
+})
+```
+
+### `spec_paths`
+
+| Value | Specs are read from |
+| --- | --- |
+| `nil` (default) | `stdpath('config')/lua/plugins` |
+| a string | `lua/plugins` and that directory |
+| a list of strings | `lua/plugins` and each of them. An entry that is not a string is skipped |
+
+The directories are added to `lua/plugins`, never instead of it. `~` is expanded, and a directory that does not exist is named in a warning and skipped. Without `spec_paths`, sarcina reads `vim.g.sarcina_spec_paths`, which takes the same values; when both are set, `spec_paths` wins and the two are not merged. With no spec found anywhere, the header says so.
+
+### `confirm`
+
+| Value | Does |
+| --- | --- |
+| `true` (default) | `:Sarcina update` checks first, lists the plugins that have a newer commit and asks `[y] yes [n] no` in the header. `:Sarcina delete` asks too, and warns about each plugin still in your specs, since it installs again at the next startup |
+| `false` | `update` and `delete` go ahead without asking |
+
+Anything but `false` keeps the question. See [Commands](#commands).
+
+### `ui.show`
+
+When the window opens by itself.
+
+| Value | Does |
+| --- | --- |
+| `'auto'` (default) | opens on real work, a first clone or a build because a plugin's commit changed, and on a failure. A warm startup stays quiet |
+| `'always'` | opens at every startup |
+| `'never'` | never opens by itself; messages are kept for `require('sarcina.ui').messages()`. A question still opens it |
+
+A window that opened by itself closes 3 s after a clean run, and a failure keeps it open. `:Sarcina panel` opens it and keeps it open until you close it. See [Window](#window).
+
+### `ui.view`
+
+How the width is shared between the list and the details. The window is 80% of the editor wide.
+
+| Value | Does |
+| --- | --- |
+| `'main'` (default) | the list takes 70% and the details 30%, which leaves each row room for its message: git's progress, a build's output, an error |
+| `'split'` | 50/50, for longer details such as a changelog |
+
+`=` in the window switches between them for the rest of the session.
+
+### `ui.height`
+
+| Value | Does |
+| --- | --- |
+| `'regular'` (default) | the window is 80% of the editor tall |
+| `'extended'` | 95% tall. The header and the footer keep their size, so every extra row goes to the list and the details |
+
+`-` in the window switches between them, in either view.
+
+### `ui.rounded`
+
+| Value | Does |
+| --- | --- |
+| `true` (default) | the tasks widget of each row has rounded ends, drawn with Powerline glyphs, which need a patched font (a Nerd Font) |
+| `false` | flat ends, for a font without those glyphs |
+
+### `ui.check_on_open`
+
+| Value | Does |
+| --- | --- |
+| `true` (default) | opening the window checks Sarcina, then every plugin, for updates, and fills the [Updates](#updates) list. It skips the check when one of every plugin finished less than 5 minutes ago, and waits for a run of installs or updates to end |
+| `false` | nothing is checked until `C` in the window or `:Sarcina check` |
+
+A check never moves a plugin; `:Sarcina update` does.
+
+### Values sarcina does not know
+
+An unknown `show`, `view` or `height` is named in a warning, and the default is used. An unknown key, such as `ui = { veiw = 'split' }`, is ignored without a word.
+
+### Tuning
+
+These are fields of the modules, not options of `setup()`. Set them before `setup()` runs; nothing checks their values.
+
+| Field | Default | What it is |
+| --- | --- | --- |
+| `require('sarcina.tasks').max_concurrent` | `4` | tasks that run at once |
+| `require('sarcina.tasks').max_installs` | `8` | clones and update fetches that run at once |
+| `require('sarcina.checker').max_concurrent` | `8` | remotes a check for updates asks at once |
+| `require('sarcina.checker').fresh_for` | `300000` (5 min) | how recent, in ms, a check of every plugin can be for an open of the window to skip its own |
+| `require('sarcina.executors').git_timeout` | `600000` (10 min) | how long, in ms, a git command that talks to a remote (a clone, a fetch, `ls-remote`) may run before it is stopped |
+| `require('sarcina.ui').close_delay` | `3000` | how long, in ms, a window that opened by itself stays after a clean run |
+| `require('sarcina.ui').message_ttl` | `8000` | how long, in ms, a message stays in the header; an error stays three times as long |
 
 ## When plugins load
 
@@ -263,7 +366,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 
 **`check`** asks each plugin's remote where the plugin should be (`git ls-remote`): the tip of its default branch, or what its [pin](#pins) points at. For a plugin that is somewhere else it fetches the commits after the one the plugin is at (`git fetch --shallow-since`), to list them, and leaves the checkout as it is. It runs outside the task list, so the rows keep their state, and its results go to the [Updates section](#updates) of the window; a message names the plugins that have an update. A check of named plugins keeps what an earlier check found for the others. **`update`** asks the same, then fetches that commit (`git fetch --depth 1`) and moves the plugin there with `git reset --hard`, because a depth-1 clone cannot fast-forward. A plugin with changes of its own to tracked files is left as it is and named in the summary. The plugin's `build` follows in the same run: it is gated on the commit, as always, so only the plugins that moved are rebuilt. Fetches start together like installs do (up to `tasks.max_installs`), and builds wait for all of them. A plugin that is already loaded keeps running its old code until you restart Neovim. A plugin that is not installed is named and skipped; `:Sarcina install` installs it. A fetch that fails, such as offline, fails that plugin and the others carry on.
 
-**`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`delete`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are asked in the header (see [Messages](#messages)) and skipped with `setup({ confirm = false })`.
+**`update`** asks before it changes anything: it runs a `check`, lists the plugins that have a newer commit, and moves only those if you say yes. With nothing newer it asks nothing. **`delete`** takes one name or several (completed with Tab), lists them, and adds a warning for each one that is still in your specs, because it installs again at the next startup. Both questions are asked in the header (see [Messages](#messages)) and skipped with `setup({ confirm = false })` (see [Setup options](#setup-options)).
 
 **`install`** reads your specs from disk and runs the plan of each plugin that has not loaded in this session: one that is not on disk is cloned (`Installing 1: …`), one that is on disk but did not load, such as a spec you just added, is loaded (`Loading 1: …`), and one a failure stopped before it loaded runs again. Each loads the way its spec says, now, later or on a trigger, so it works without a restart. A plugin that loaded, is waiting for its trigger, or is queued is left alone: its `config` does not run twice, and it does not move (that is `update`). A plugin whose `config` failed after it was on the runtimepath counts as loaded; restart Neovim to run it again.
 
@@ -386,7 +489,7 @@ The details pane needs 28 columns and the list 40, which the `main` view has fro
 
 The window reads the stats and keeps no task state, so it cannot drift from the engine. An event redraws the row of its plugin, the header and the footer, and the details when they show that plugin. The size is fixed when the window opens, so streaming output never moves it.
 
-It opens by itself on a first install (a clone), on a build that runs because the plugin's commit changed, and on a failure. A warm startup, where everything is installed and built, never opens it. `setup({ ui = { show = ... } })` changes that:
+It opens by itself on a first install (a clone), on a build that runs because the plugin's commit changed, and on a failure. A warm startup, where everything is installed and built, never opens it. `setup({ ui = { show = ... } })` changes that (see [Setup options](#setup-options) for every option):
 
 | `show` | Opens by itself |
 | --- | --- |
