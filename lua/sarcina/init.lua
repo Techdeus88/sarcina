@@ -46,9 +46,9 @@ function M._warn_stale(resolved)
     )
 end
 
--- Why Sarcina cannot run here, or nil: it needs Neovim 0.10 (vim.uv, vim.system, window footers) and git.
+-- Why Sarcina cannot run here, or nil: it needs Neovim 0.11 and git.
 function M._unsupported()
-    if vim.fn.has('nvim-0.10') == 0 then return 'Sarcina needs Neovim 0.10 or newer' end
+    if vim.fn.has('nvim-0.11') == 0 then return 'Sarcina needs Neovim 0.11 or newer' end
     if vim.fn.executable('git') == 0 then return 'Sarcina needs git on your PATH' end
 end
 

@@ -583,7 +583,7 @@ stylua --check lua plugin tests
 luacheck lua plugin tests
 ```
 
-The tests use a throwaway XDG directory and local git repos, with no network. Set `SARCINA_TEST_FILTER` to a substring to run matching tests only. CI runs them on Linux and macOS against Neovim 0.10, stable and nightly, with the two linters, on every push to `main` and every pull request.
+The tests use a throwaway XDG directory and local git repos, with no network. Set `SARCINA_TEST_FILTER` to a substring to run matching tests only. CI runs them on Linux and macOS against Neovim 0.11.0, stable and nightly, with the two linters, on every push to `main` and every pull request.
 
 Write commit messages as [conventional commits](https://www.conventionalcommits.org): `feat:` for a feature, `fix:` for a fix, `feat!:` or a `BREAKING CHANGE:` footer for a change that breaks something, and `docs:`, `test:` or `chore:` for the rest. Release-please reads them to choose the next version and write the CHANGELOG.
 

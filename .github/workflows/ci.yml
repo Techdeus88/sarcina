@@ -14,7 +14,8 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
-        nvim: [v0.11, stable, nightly]
+        # The oldest Neovim Sarcina supports, as a full tag: the setup action takes no other form.
+        nvim: [v0.11.0, stable, nightly]
     steps:
       - uses: actions/checkout@v4
       - uses: rhysd/action-setup-vim@v1

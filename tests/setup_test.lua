@@ -55,11 +55,11 @@ test('the pin of setup is what Sarcina follows, and a pin it cannot use is named
     h.eq(own.pin, nil)
 end)
 
-test('setup on a Neovim older than 0.10 says so and does nothing else', function()
+test('setup on a Neovim older than 0.11 says so and does nothing else', function()
     local has, echo = vim.fn.has, vim.api.nvim_echo
     local said
     vim.fn.has = function(feature)
-        if feature == 'nvim-0.10' then return 0 end
+        if feature == 'nvim-0.11' then return 0 end
         return has(feature)
     end
     vim.api.nvim_echo = function(chunks) said = chunks end
@@ -68,7 +68,7 @@ test('setup on a Neovim older than 0.10 says so and does nothing else', function
     local ok, err = pcall(require('sarcina').setup, { ui = { view = 'split' } })
     vim.fn.has, vim.api.nvim_echo = has, echo
     assert(ok, err)
-    h.eq(said, { { 'Sarcina needs Neovim 0.10 or newer', 'ErrorMsg' } })
+    h.eq(said, { { 'Sarcina needs Neovim 0.11 or newer', 'ErrorMsg' } })
     h.eq(window.view, 'main')
 end)
 
