@@ -204,34 +204,36 @@ test('sync refuses a manifest with no plugins, and deletes nothing', function()
     h.eq(exists('syncsafe.nvim'), true)
 end)
 
-
-test('load takes a plugin that waits for its trigger and loads it now, and a bare load keeps the rest lazy', function()
-    fresh()
-    local one, two = h.upstream(), h.upstream()
-    installed('lazyone.nvim', one)
-    installed('lazytwo.nvim', two)
-    manifest({
-        { name = 'lazyone.nvim', remote = one, extra = "cmd = 'LazyOne'" },
-        { name = 'lazytwo.nvim', remote = two, extra = "cmd = 'LazyTwo'" },
-    })
-    install()
-    local scheduler = require('sarcina.scheduler')
-    h.eq({ scheduler.state('lazyone.nvim'), scheduler.state('lazytwo.nvim') }, { 'waiting', 'waiting' })
-    command('load')
-    h.ok(h.notified('Nothing to load'), vim.inspect(h.notes))
-    h.eq(scheduler.state('lazytwo.nvim'), 'waiting')
-    command('load lazyone.nvim')
-    h.ok(h.notified('Loading 1 plugin before its trigger: lazyone.nvim'), vim.inspect(h.notes))
-    h.eq(scheduler.state('lazyone.nvim'), 'loaded')
-    h.ok(loaded('lazyone.nvim'), 'the plugin is not loaded')
-    h.eq(_G.sync_configs, { ['lazyone.nvim'] = 1 })
-    h.eq(scheduler.state('lazytwo.nvim'), 'waiting')
-    command('load lazyone.nvim')
-    h.ok(h.notified('Already loaded: lazyone.nvim.'), vim.inspect(h.notes))
-    h.eq(_G.sync_configs, { ['lazyone.nvim'] = 1 })
-    command('load gone.nvim')
-    h.ok(h.notified('Not installed: gone.nvim. Run :Sarcina install.'), vim.inspect(h.notes))
-end)
+test(
+    'load takes a plugin that waits for its trigger and loads it now, and a bare load keeps the rest lazy',
+    function()
+        fresh()
+        local one, two = h.upstream(), h.upstream()
+        installed('lazyone.nvim', one)
+        installed('lazytwo.nvim', two)
+        manifest({
+            { name = 'lazyone.nvim', remote = one, extra = "cmd = 'LazyOne'" },
+            { name = 'lazytwo.nvim', remote = two, extra = "cmd = 'LazyTwo'" },
+        })
+        install()
+        local scheduler = require('sarcina.scheduler')
+        h.eq({ scheduler.state('lazyone.nvim'), scheduler.state('lazytwo.nvim') }, { 'waiting', 'waiting' })
+        command('load')
+        h.ok(h.notified('Nothing to load'), vim.inspect(h.notes))
+        h.eq(scheduler.state('lazytwo.nvim'), 'waiting')
+        command('load lazyone.nvim')
+        h.ok(h.notified('Loading 1 plugin before its trigger: lazyone.nvim'), vim.inspect(h.notes))
+        h.eq(scheduler.state('lazyone.nvim'), 'loaded')
+        h.ok(loaded('lazyone.nvim'), 'the plugin is not loaded')
+        h.eq(_G.sync_configs, { ['lazyone.nvim'] = 1 })
+        h.eq(scheduler.state('lazytwo.nvim'), 'waiting')
+        command('load lazyone.nvim')
+        h.ok(h.notified('Already loaded: lazyone.nvim.'), vim.inspect(h.notes))
+        h.eq(_G.sync_configs, { ['lazyone.nvim'] = 1 })
+        command('load gone.nvim')
+        h.ok(h.notified('Not installed: gone.nvim. Run :Sarcina install.'), vim.inspect(h.notes))
+    end
+)
 
 test('l in the window loads the plugin under the cursor, and every pick of the select view', function()
     fresh()
@@ -239,7 +241,10 @@ test('l in the window loads the plugin under the cursor, and every pick of the s
     local plugins = {}
     for i, name in ipairs({ 'keyone.nvim', 'keytwo.nvim', 'keythree.nvim' }) do
         installed(name, remotes[i])
-        table.insert(plugins, { name = name, remote = remotes[i], extra = string.format('cmd = %q', 'Key' .. i) })
+        table.insert(
+            plugins,
+            { name = name, remote = remotes[i], extra = string.format('cmd = %q', 'Key' .. i) }
+        )
     end
     manifest(plugins)
     install()

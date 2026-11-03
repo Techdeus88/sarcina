@@ -425,7 +425,7 @@ The results are copies, so changing one changes nothing the engine runs. A spec 
 | --- | --- |
 | `:Sarcina install` | install and load the plugins that have not loaded in this session. One that has is left alone, so its `config` never runs twice |
 | `:Sarcina install <plugins>` | the same for the plugins named, cloning only those that are not on disk |
-| `:Sarcina load [plugins]` | load the plugins that are on disk but have not loaded in this session. Nothing is cloned |
+| `:Sarcina load [plugins]` | load the plugins that are on disk but have not loaded in this session. Nothing is cloned. A plugin you name that waits for its trigger loads now, as if the trigger had fired (`l` in the window does this for the plugin under the cursor or the picks); without names, lazy plugins stay lazy |
 | `:Sarcina sync` | `install`, and list the directories that are not in your specs |
 | `:Sarcina sync!` | the same, and delete those directories |
 | `:Sarcina check [plugins]` | look for updates in the background; the details of a plugin that has one show it, and a message names them when done. Nothing is changed |
