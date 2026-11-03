@@ -105,6 +105,7 @@ local HEIGHTS = { regular = SHARE, extended = 0.95 }
 
 local entries = {} -- line number -> { kind = 'plugin', name = string }
 local line_of = {} -- plugin name -> line number
+local update_line_of = {} -- plugin name -> the line of its update
 local rows = {} -- plugin name -> the row as last drawn
 local names = {} -- plugin names in line order
 local selected = nil -- the plugin the details pane shows
@@ -455,8 +456,12 @@ local function layout(list)
     for _, row in ipairs(list) do
         if check.updates[row.name] then table.insert(found, row.name) end
     end
+    -- Sarcina is no row of the list, so its own update leads the list (see self.lua).
+    local own = require('sarcina.self').name
+    if check.updates[own] and not vim.tbl_contains(found, own) then table.insert(found, 1, own) end
     for _, name in ipairs(found) do
         add(update_line(name, check.updates[name]), { kind = 'update', name = name })
+        update_line_of[name] = #lines
     end
     local by_timing = grouped(list)
     for _, section in ipairs(SECTIONS) do
@@ -769,13 +774,13 @@ end
 --- is `stats.plugins()` when the caller already has it.
 function M.draw(bufs, list)
     list = list or stats.plugins()
-    entries, line_of, rows, names = {}, {}, {}, {}
+    entries, line_of, rows, names, update_line_of = {}, {}, {}, {}, {}
     measure()
     local lines = layout(list)
     vim.api.nvim_buf_clear_namespace(bufs.list, NS, 0, -1)
     put(bufs.list, NS, 1, vim.api.nvim_buf_line_count(bufs.list), #lines > 0 and lines or { build_line({}) })
     put_chrome(bufs)
-    if not (selected and line_of[selected]) then selected = names[1] end
+    if not (selected and (line_of[selected] or update_line_of[selected])) then selected = names[1] end
     for name in pairs(marked) do
         if not line_of[name] then marked[name] = nil end
     end
@@ -982,6 +987,28 @@ local function changelog_lines(commits)
     return lines
 end
 
+-- The details of Sarcina's own update: where it runs from, its commit, the update and the commits it brings.
+local function own_lines(info)
+    local dir = require('sarcina.self').dir()
+    local function fact(key, value, group)
+        return build_line({ { pad(key, KEY_W + 1), 'SarcinaTag' }, { value, group } })
+    end
+    local lines = {
+        fact('state', '↑ update available', 'SarcinaUpdate'),
+        fact('path', vim.fn.fnamemodify(dir, ':~')),
+        fact('rev', rev_of(require('sarcina.self').name, dir)),
+        build_line(
+            vim.list_extend(
+                { { pad('update', KEY_W + 1), 'SarcinaTag' }, { short(info.to), 'SarcinaRev' } },
+                behind(info)
+            )
+        ),
+        fact('restart', 'after :Sarcina update, to load it', 'SarcinaNote'),
+        build_line({}),
+    }
+    return vim.list_extend(lines, changelog_lines(info.commits or {}))
+end
+
 --- Draws the details of the selected plugin in `buf`: its facts, then one line per task of its plan with
 --- the task's own time. Returns the plugin's name, or nil when nothing is selected.
 function M.draw_details(buf)
@@ -1027,13 +1054,17 @@ function M.draw_details(buf)
         else
             vim.list_extend(lines, task_lines(selected))
         end
+    end
+    local own = not row and selected == require('sarcina.self').name and checker().update_of(selected)
+    if own then lines = own_lines(own) end
+    if #lines > 0 then
         -- A blank line above the details and one below them, as in the list.
         table.insert(lines, 1, build_line({}))
         table.insert(lines, build_line({}))
     end
     vim.api.nvim_buf_clear_namespace(buf, DETAIL_NS, 0, -1)
     put(buf, DETAIL_NS, 1, vim.api.nvim_buf_line_count(buf), #lines > 0 and lines or { build_line({}) })
-    return row and selected or nil
+    return (row or own) and selected or nil
 end
 
 return M

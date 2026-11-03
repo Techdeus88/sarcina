@@ -187,6 +187,7 @@ function M.complete(ArgLead, CmdLine)
         )
     then
         candidates = vim.tbl_map(function(entry) return entry.name end, require('sarcina.stats').specs())
+        if require('sarcina.self').entry() then table.insert(candidates, require('sarcina.self').name) end
     elseif CmdLine and CmdLine:match('^%s*%S+%s+delete%s') then
         candidates = installer.installed()
     end

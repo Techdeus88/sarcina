@@ -337,15 +337,22 @@ function M.look_ahead(dir, pin, cb)
             if is_commit(head, goal) then return cb(nil) end
             local info = { from = head, to = goal }
             if target.commit then return cb(info) end
-            -- A day before the plugin's commit, so that commit and everything after it come down.
-            local since = os.date('!%Y-%m-%dT%H:%M:%SZ', tonumber(time) - 86400)
-            git(dir, { 'fetch', '--shallow-since=' .. since, 'origin', target.ref }, function(fetched)
-                if not fetched then return cb(info) end
-                commits_ahead(dir, function(list)
-                    info.commits = list
-                    cb(info)
-                end)
-            end, true)
+            -- A shallow clone fetches from a day before the plugin's commit, so that commit and everything after
+            -- it come down and no more. A full clone, such as Sarcina's own, has the history and keeps it whole.
+            git(dir, { 'rev-parse', '--is-shallow-repository' }, function(_, shallow)
+                local fetch = { 'fetch', 'origin', target.ref }
+                if shallow == 'true' then
+                    local since = os.date('!%Y-%m-%dT%H:%M:%SZ', tonumber(time) - 86400)
+                    table.insert(fetch, 2, '--shallow-since=' .. since)
+                end
+                git(dir, fetch, function(fetched)
+                    if not fetched then return cb(info) end
+                    commits_ahead(dir, function(list)
+                        info.commits = list
+                        cb(info)
+                    end)
+                end, true)
+            end)
         end)
     end)
 end

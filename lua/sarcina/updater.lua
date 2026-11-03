@@ -38,6 +38,19 @@ end
 
 local function installed(entry) return vim.uv.fs_stat(paths.install(entry.name)) ~= nil end
 
+-- `resolved` with Sarcina itself first, which checks and updates like a plugin (see self.lua), unless it is off or a
+-- spec already names it or its directory.
+local function with_self(resolved)
+    local self = require('sarcina.self')
+    local own = self.entry()
+    if not own then return resolved end
+    for _, entry in ipairs(resolved) do
+        if entry.name == own.name or self.is(paths.install(entry.name)) then return resolved end
+    end
+    paths.set_dir(own.name, own.dir)
+    return vim.list_extend({ own }, resolved)
+end
+
 -- A plugin's tasks for the run: the fetch, and for an update the plugin's own build, which `per_commit` runs
 -- only when the plugin moved. The fetches start together and every build waits for all of them.
 local function plan(entry, mode)
@@ -111,7 +124,8 @@ local function run(mode, resolved, names, finish)
         local spec = vim.tbl_extend('force', {}, entry.spec, { tasks = list })
         return { name = entry.name, timing = entry.timing, spec = spec }
     end, resolved)
-    stats.register(entries)
+    -- Sarcina is no row of the window: its update shows in the Updates list and the header.
+    stats.register(vim.tbl_filter(function(entry) return not entry.spec.self end, entries))
     if #missing > 0 then
         ui.emit(
             'warn',
@@ -147,7 +161,7 @@ local function run(mode, resolved, names, finish)
 end
 
 --- Fetch what the remote of each plugin has, and say which have an update. `names` picks plugins, none picks all.
-function M.check(resolved, names) run('check', resolved, names or {}) end
+function M.check(resolved, names) run('check', with_self(resolved), names or {}) end
 
 -- What a finished look says about `entries`, and at what level: the plugins with an update and the ones whose
 -- remote could not say.
@@ -185,7 +199,7 @@ end
 --- plugins, none picks all; a look at some keeps what an earlier one found for the others.
 function M.look(resolved, names)
     names = names or {}
-    local picked = select(resolved, names)
+    local picked = select(with_self(resolved), names)
     if not picked then return end
     local checker = require('sarcina.checker')
     if checker.state().running then return ui.emit('info', 'Already checking for updates') end
@@ -235,6 +249,7 @@ end
 --- checks first and asks before it changes anything, naming the plugins that have a newer commit.
 function M.update(resolved, names)
     names = names or {}
+    resolved = with_self(resolved)
     if not confirm.enabled then return run('update', resolved, names) end
     run('check', resolved, names, function(jobs)
         local moving, lines = available(jobs)

@@ -53,7 +53,11 @@ function M.installed()
         local name, kind = vim.uv.fs_scandir_next(handle)
         if not name then break end
         local hidden = name:sub(1, 1) == '.' -- sarcina's own, such as .staging
-        if (kind == 'directory' or kind == 'link') and not hidden then table.insert(found, name) end
+        -- A bootstrap often clones Sarcina into the plugins directory; it is not a plugin to clean or delete.
+        local own = require('sarcina.self').is(paths.plugins_dir() .. name)
+        if (kind == 'directory' or kind == 'link') and not hidden and not own then
+            table.insert(found, name)
+        end
     end
     table.sort(found)
     return found
