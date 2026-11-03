@@ -232,6 +232,7 @@ test(
         h.eq(_G.sync_configs, { ['lazyone.nvim'] = 1 })
         command('load gone.nvim')
         h.ok(h.notified('Not installed: gone.nvim. Run :Sarcina install.'), vim.inspect(h.notes))
+        manifest({})
     end
 )
 
@@ -269,6 +270,8 @@ test('l in the window loads the plugin under the cursor, and every pick of the s
     h.eq({ scheduler.state('keytwo.nvim'), scheduler.state('keythree.nvim') }, { 'loaded', 'loaded' })
     h.eq(_G.sync_configs, { ['keyone.nvim'] = 1, ['keytwo.nvim'] = 1, ['keythree.nvim'] = 1 })
     h.eq(window.select_mode, false)
+    ui.close()
+    manifest({})
 end)
 
 return tests

@@ -1253,13 +1253,15 @@ if vim.fn.executable('git') == 1 then
     local function run_child(spec)
         local specs = vim.fn.stdpath('config') .. '/lua/plugins'
         vim.fn.mkdir(specs, 'p')
+        -- The child reads every spec file there, so it gets only this one, whatever other tests left behind.
+        for _, other in ipairs(vim.fn.glob(specs .. '/*.lua', false, true)) do
+            vim.fn.delete(other)
+        end
         local file = specs .. '/window_child.lua'
         vim.fn.writefile({ 'return {', spec, '}' }, file)
         local script = vim.fn.tempname() .. '.lua'
         vim.fn.writefile({
             string.format('vim.opt.rtp:prepend(%q)', root),
-            -- A window that opens by itself waits for a colorscheme; a real setup has one.
-            "vim.cmd.colorscheme('default')",
             "require('sarcina').setup()",
             "vim.api.nvim_create_autocmd('VimEnter', { once = true, callback = function()",
             '    vim.defer_fn(function()',
