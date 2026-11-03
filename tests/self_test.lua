@@ -21,8 +21,8 @@ local function commit(dir, subject)
     h.git(dir, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '-m', subject)
 end
 
--- Sarcina as a full clone of a remote that is `ahead` commits further, in the plugins directory as a bootstrap puts
--- it. Returns the remote and the clone.
+-- Sarcina as a full clone of a remote that is `ahead` commits further, all of them released to `stable`, in the
+-- plugins directory as a bootstrap puts it. Returns the remote and the clone.
 local function own_checkout(ahead)
     local remote = h.upstream()
     local dir = paths.plugins_dir() .. 'sarcina'
@@ -31,12 +31,25 @@ local function own_checkout(ahead)
     for i = 1, ahead do
         commit(remote, 'feat: sarcina ' .. i)
     end
+    h.git(remote, 'branch', '-f', 'stable')
     self.root = dir
     return remote, dir
 end
 
+local function subjects(info)
+    return vim.tbl_map(function(c) return c.subject end, info and info.commits or {})
+end
+
 local function finished()
     h.ok(vim.wait(10000, function() return not checker.state().running end, 20))
+end
+
+-- What a check of everything finds for Sarcina, from a fresh start.
+local function own_update()
+    checker._reset()
+    checker.run()
+    finished()
+    return checker.update_of('sarcina')
 end
 
 test('Sarcina runs from the repository its files are in', function()
@@ -138,6 +151,56 @@ test('update moves Sarcina to its remote like a plugin, and it takes no row in t
     h.eq(h.head(dir), h.head(remote))
     h.eq(stats.plugin('sarcina'), nil)
     h.ok(h.notified('Updated 1 plugin: sarcina'), vim.inspect(h.notes))
+end)
+
+test('without a pin Sarcina follows stable, the latest release, and not what main has past it', function()
+    local remote, dir = own_checkout(1)
+    local released = h.git(remote, 'rev-parse', 'stable')
+    commit(remote, 'feat: unreleased')
+    local own = own_update()
+    h.eq(subjects(own), { 'feat: sarcina 1' })
+    h.eq(own.to, released)
+    h.register({ { name = 'a', tasks = { h.lua('rtp', h.noop) } } })
+    updater.update({}, { 'sarcina' })
+    h.ok(tasks.wait(15000), 'the update did not finish')
+    h.eq(h.head(dir), released)
+end)
+
+test('a pin takes Sarcina to that tag, to the newest version that matches, or to main', function()
+    local remote, dir = own_checkout(0)
+    local main = h.git(remote, 'branch', '--show-current')
+    commit(remote, 'feat: one')
+    h.git(remote, 'tag', 'v1.0.0')
+    commit(remote, 'feat: two')
+    h.git(remote, 'tag', 'v1.1.0')
+    commit(remote, 'feat: three')
+    self.pin = { tag = 'v1.0.0' }
+    h.eq(subjects(own_update()), { 'feat: one' })
+    self.pin = { version = '1.*' }
+    h.eq(subjects(own_update()), { 'feat: two', 'feat: one' })
+    self.pin = { branch = main }
+    h.eq(subjects(own_update()), { 'feat: three', 'feat: two', 'feat: one' })
+    self.pin = { version = '1.*' }
+    h.register({ { name = 'a', tasks = { h.lua('rtp', h.noop) } } })
+    updater.update({}, { 'sarcina' })
+    h.ok(tasks.wait(15000), 'the update did not finish')
+    h.eq(h.head(dir), h.git(remote, 'rev-parse', 'v1.1.0^{commit}'))
+end)
+
+test('the details of an update of Sarcina say what it follows', function()
+    local remote = own_checkout(1)
+    h.git(remote, 'tag', 'v9.9.9')
+    self.pin = { tag = 'v9.9.9' }
+    h.register({ { name = 'a', tasks = { h.lua('rtp', h.noop) } } })
+    vim.o.columns, vim.o.lines = 200, 50
+    ui.open()
+    own_update()
+    ui._flush()
+    vim.api.nvim_set_current_win(ui._winid)
+    vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+    vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+    local text = table.concat(vim.api.nvim_buf_get_lines(ui._detail_bufnr, 0, -1, false), '\n')
+    h.ok(text:find('pin%s+tag v9.9.9'), text)
 end)
 
 test('with no git checkout to look at, there is no self-check', function()

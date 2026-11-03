@@ -989,6 +989,13 @@ local function changelog_lines(commits)
 end
 
 -- The details of Sarcina's own update: where it runs from, its commit, the update and the commits it brings.
+-- What Sarcina follows, in words: `branch stable`, or the pin of setup().
+local function own_pin()
+    local entry = require('sarcina.self').entry()
+    local pin = entry and require('sarcina.pin').of(entry.spec)
+    return pin and require('sarcina.pin').describe(pin) or ''
+end
+
 local function own_lines(info)
     local dir = require('sarcina.self').dir()
     local function fact(key, value, group)
@@ -998,6 +1005,7 @@ local function own_lines(info)
         fact('state', '↑ update available', 'SarcinaUpdate'),
         fact('path', vim.fn.fnamemodify(dir, ':~')),
         fact('rev', rev_of(require('sarcina.self').name, dir)),
+        fact('pin', own_pin()),
         build_line(
             vim.list_extend(
                 { { pad('update', KEY_W + 1), 'SarcinaTag' }, { short(info.to), 'SarcinaRev' } },

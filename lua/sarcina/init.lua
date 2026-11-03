@@ -46,17 +46,52 @@ function M._warn_stale(resolved)
     )
 end
 
+-- Why Sarcina cannot run here, or nil: it needs Neovim 0.10 (vim.uv, vim.system, window footers) and git.
+function M._unsupported()
+    if vim.fn.has('nvim-0.10') == 0 then return 'Sarcina needs Neovim 0.10 or newer' end
+    if vim.fn.executable('git') == 0 then return 'Sarcina needs git on your PATH' end
+end
+
+-- The `pin` option: what Sarcina itself follows (see self.lua). A pin it cannot use is named, and stable followed.
+local function configure_pin(pin)
+    local own = require('sarcina.self')
+    own.pin = nil
+    if pin == nil then return end
+    local chosen, ignored
+    if type(pin) == 'table' then
+        chosen, ignored = require('sarcina.pin').of(pin)
+    end
+    if not chosen then
+        return ui.emit('warning', 'pin names no commit, tag, version or branch, so Sarcina follows stable')
+    end
+    if ignored then
+        ui.emit(
+            'warning',
+            string.format(
+                'pin: ignoring %s, which %s outranks',
+                table.concat(ignored, ' and '),
+                require('sarcina.pin').describe(chosen)
+            )
+        )
+    end
+    own.pin = pin
+end
+
 --- User‑facing entry point.
 --- Call `require('sarcina').setup()` after adding Sarcina to your runtimepath.
 --- Installed `now` plugins load before it returns; the rest runs in the background once the UI is up,
 --- and `require('sarcina.tasks').wait()` blocks until it is done. `opts.ui.show` is when the window opens
 --- by itself: 'auto' (default), 'always' or 'never'. `opts.confirm = false` skips the question before
---- `update` and `delete`.
+--- `update` and `delete`. `opts.pin` pins Sarcina itself, as a spec pins a plugin; without it Sarcina follows the
+--- `stable` branch, the latest release.
 function M.setup(opts)
+    local why = M._unsupported()
+    if why then return vim.api.nvim_echo({ { why, 'ErrorMsg' } }, true, {}) end
     stats.begin()
     opts = opts or {}
     ui.configure(opts.ui)
     require('sarcina.confirm').configure(opts.confirm)
+    configure_pin(opts.pin)
     ui.init()
 
     -- 1️⃣ Load all plugin specs (auto‑discovers files under lua/plugins/ or custom paths)

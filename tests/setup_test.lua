@@ -37,6 +37,41 @@ test('setup still reports a failure', function()
     h.ok(h.notified('1 failed'))
 end)
 
+test('the pin of setup is what Sarcina follows, and a pin it cannot use is named', function()
+    local own = require('sarcina.self')
+    require('sarcina').setup({ pin = { tag = 'v1.0.0', branch = 'main' } })
+    h.ok(tasks.wait(2000))
+    h.eq(own.pin, { tag = 'v1.0.0', branch = 'main' })
+    h.ok(h.notified('pin: ignoring branch, which tag v1.0.0 outranks'), vim.inspect(h.notes))
+    require('sarcina').setup({ pin = 'v1.0.0' })
+    h.ok(tasks.wait(2000))
+    h.eq(own.pin, nil)
+    h.ok(
+        h.notified('pin names no commit, tag, version or branch, so Sarcina follows stable'),
+        vim.inspect(h.notes)
+    )
+    require('sarcina').setup()
+    h.ok(tasks.wait(2000))
+    h.eq(own.pin, nil)
+end)
+
+test('setup on a Neovim older than 0.10 says so and does nothing else', function()
+    local has, echo = vim.fn.has, vim.api.nvim_echo
+    local said
+    vim.fn.has = function(feature)
+        if feature == 'nvim-0.10' then return 0 end
+        return has(feature)
+    end
+    vim.api.nvim_echo = function(chunks) said = chunks end
+    local window = require('sarcina.window')
+    window.view = 'main'
+    local ok, err = pcall(require('sarcina').setup, { ui = { view = 'split' } })
+    vim.fn.has, vim.api.nvim_echo = has, echo
+    assert(ok, err)
+    h.eq(said, { { 'Sarcina needs Neovim 0.10 or newer', 'ErrorMsg' } })
+    h.eq(window.view, 'main')
+end)
+
 test('setup warns about a plugin on disk that no spec owns, and about nothing else', function()
     local paths = require('sarcina.paths')
     local dir = vim.fn.stdpath('config') .. '/lua/plugins'

@@ -1,6 +1,52 @@
 # sarcina
 
+[![CI](https://github.com/Techdeus88/sarcina/actions/workflows/ci.yml/badge.svg)](https://github.com/Techdeus88/sarcina/actions/workflows/ci.yml)
+
 A Neovim plugin manager built around a task engine. Each plugin expands into an ordered list of tasks (clone, build, runtimepath, config). A floating window shows each plugin's progress as the engine works.
+
+## Requirements
+
+- Neovim 0.10 or newer. `setup()` says so and does nothing on an older one.
+- git 2.19 or newer, on your `PATH`, for partial clones (`--filter=blob:none`), `--shallow-since` and `--is-shallow-repository`.
+- A [Nerd Font](https://www.nerdfonts.com) for the rounded ends of the tasks widget. Without one, set `ui = { rounded = false }`.
+
+## Install
+
+Clone Sarcina from your config, before anything else, and call `setup()`:
+
+```lua
+local path = vim.fn.stdpath('data') .. '/sarcina/plugins/sarcina'
+if not vim.uv.fs_stat(path) then
+    local out = vim.fn.system({
+        'git',
+        'clone',
+        '--filter=blob:none',
+        '--branch=stable',
+        'https://github.com/Techdeus88/sarcina.git',
+        path,
+    })
+    if vim.v.shell_error ~= 0 then
+        vim.api.nvim_echo({ { 'Failed to clone sarcina:\n', 'ErrorMsg' }, { out } }, true, {})
+        return
+    end
+end
+vim.opt.rtp:prepend(path)
+require('sarcina').setup()
+```
+
+`stable` is the latest release. Sarcina checks itself for updates before your plugins, and follows `stable` unless you pin it: a new release shows as `↑ sarcina` at the head of the [Updates](#updates) list, and `:Sarcina update sarcina` moves it there. Restart Neovim to run the new code. To stay on a release, or to follow every commit, pin Sarcina in `setup()`:
+
+```lua
+require('sarcina').setup({ pin = { tag = 'v0.1.0' } }) -- this release only
+require('sarcina').setup({ pin = { version = '0.*' } }) -- the newest 0.x release
+require('sarcina').setup({ pin = { branch = 'main' } }) -- every commit, unreleased ones too
+```
+
+See [`pin`](#pin) under Setup options.
+
+### Releases
+
+Versions follow [semver](https://semver.org) and are tagged `vX.Y.Z`; [CHANGELOG.md](CHANGELOG.md) lists what each one brings. While the version is `0.x`, a minor release may break something, and its notes say what. Releases are cut by [release-please](https://github.com/googleapis/release-please) from [conventional commits](https://www.conventionalcommits.org) (`feat:`, `fix:`, `feat!:` for a breaking change), and each one moves `stable` to its tag.
 
 ## Layout
 
@@ -110,12 +156,13 @@ Without `main`, sarcina matches the plugin name, then the repo name, against the
 
 ## Setup options
 
-`setup()` takes three keys: `spec_paths`, `confirm` and `ui`. Every one is optional, and `setup()` with no table is the same as this:
+`setup()` takes four keys: `spec_paths`, `confirm`, `pin` and `ui`. Every one is optional, and `setup()` with no table is the same as this:
 
 ```lua
 require('sarcina').setup({
     spec_paths = nil, -- more directories of specs, on top of lua/plugins
     confirm = true, -- ask before update and delete
+    pin = nil, -- what Sarcina itself follows; nil is the stable branch, the latest release
     ui = {
         show = 'auto', -- when the window opens by itself
         view = 'main', -- the list 70%, the details 30%
@@ -144,6 +191,20 @@ The directories are added to `lua/plugins`, never instead of it. `~` is expanded
 | `false` | `update` and `delete` go ahead without asking |
 
 Anything but `false` keeps the question. See [Commands](#commands).
+
+### `pin`
+
+What Sarcina itself follows when it checks for updates and when `:Sarcina update` moves it. It takes the keys a spec pins a plugin with (see [Pins](#pins)).
+
+| Value | Sarcina follows |
+| --- | --- |
+| `nil` (default) | the `stable` branch, which each release moves to its tag |
+| `{ tag = 'v0.1.0' }` | that release, and stays there |
+| `{ version = '0.*' }` | the newest release in that range |
+| `{ branch = 'main' }` | every commit, unreleased ones too |
+| `{ commit = '03751ca' }` | that commit |
+
+With more than one key, the first of `commit`, `tag`, `version` and `branch` wins and a warning names the others. A pin that is not a table, or names none of them, is named in a warning, and Sarcina follows `stable`. The details of Sarcina's update say what it follows (`pin  branch stable`).
 
 ### `ui.show`
 
@@ -462,7 +523,7 @@ When the window opens it looks for updates in the background (see `check` under 
 
 While the check runs the title says `↻ checking…`. Each plugin that is behind gets a row as its answer comes in: the commit it would move to, the subject of the newest commit, how many commits it is behind, and how many of them break something. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. The arrow sits one cell in from the names of the rows below. The rows move with the cursor like the others, and in the select view (`v`) they have a pick box too: `Space` picks the plugin, here and in its section. The details show the plugin with an `update` line. An `update` that moves a plugin, or finds it where it should be, takes it off the list, so it shows only in its section again; one that leaves it alone, such as for changes of its own, keeps it there. `<CR>` switches the details to the plugin's changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. A check that found nothing says `✔ up to date`, and remotes that could not be reached are counted in the title. Without a check the list has no title.
 
-**Sarcina itself** is checked first, on its own, before the plugins it manages: the directory its files run from, wherever that is (a bootstrap in your config often clones it into the plugins directory), followed on its remote's default branch. When it is behind, its update leads the list as `↑ sarcina …`, and its details say where it runs from and list the commits it would bring. `:Sarcina update` (or `U`, or `u` on its row) moves it like a plugin, and `:Sarcina update sarcina` moves only it; restart Neovim to run the new code. A checkout that is not a git clone is not checked. Looking ahead never cuts the history of a full clone: only the shallow clones Sarcina makes for plugins fetch from a date. `clean`, `delete` and the startup warning about directories no spec owns never count Sarcina's own directory as a plugin.
+**Sarcina itself** is checked first, on its own, before the plugins it manages: the directory its files run from, wherever that is (a bootstrap in your config often clones it into the plugins directory), followed on the `stable` branch, the latest release, or on what [`pin`](#pin) names. When it is behind, its update leads the list as `↑ sarcina …`, and its details say where it runs from and list the commits it would bring. `:Sarcina update` (or `U`, or `u` on its row) moves it like a plugin, and `:Sarcina update sarcina` moves only it; restart Neovim to run the new code. A checkout that is not a git clone is not checked. Looking ahead never cuts the history of a full clone: only the shallow clones Sarcina makes for plugins fetch from a date. `clean`, `delete` and the startup warning about directories no spec owns never count Sarcina's own directory as a plugin.
 
 The check skips a window that opens less than 5 minutes after a check of every plugin finished, and a window that opens while plugins are being installed or updated checks once that run ends. `setup({ ui = { check_on_open = false } })` turns it off; then `C` in the list, or `:Sarcina check`, looks when you ask. Nothing moves until you run `update`.
 
@@ -522,5 +583,7 @@ stylua --check lua plugin tests
 luacheck lua plugin tests
 ```
 
-The tests use a throwaway XDG directory and local git repos, with no network. Set `SARCINA_TEST_FILTER` to a substring to run matching tests only.
+The tests use a throwaway XDG directory and local git repos, with no network. Set `SARCINA_TEST_FILTER` to a substring to run matching tests only. CI runs them on Linux and macOS against Neovim 0.10, stable and nightly, with the two linters, on every push to `main` and every pull request.
+
+Write commit messages as [conventional commits](https://www.conventionalcommits.org): `feat:` for a feature, `fix:` for a fix, `feat!:` or a `BREAKING CHANGE:` footer for a change that breaks something, and `docs:`, `test:` or `chore:` for the rest. Release-please reads them to choose the next version and write the CHANGELOG.
 

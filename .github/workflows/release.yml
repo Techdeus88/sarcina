@@ -1,0 +1,31 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      # Keeps a release PR open with the next version and the CHANGELOG, and tags vX.Y.Z when it is merged.
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+      - uses: actions/checkout@v4
+        if: ${{ steps.release.outputs.release_created }}
+        with:
+          fetch-depth: 0
+      # `stable` is the branch the bootstrap clones and an unpinned Sarcina follows. A plain push only moves it
+      # forward, so a stable that went its own way fails here instead of being overwritten.
+      - name: Move stable to the release
+        if: ${{ steps.release.outputs.release_created }}
+        env:
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: git push origin "refs/tags/${TAG}^{commit}:refs/heads/stable"

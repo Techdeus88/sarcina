@@ -1,0 +1,16 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "03751caa05b0bca76ff199b8c7ea61103dba44b7",
+  "packages": {
+    ".": {
+      "release-type": "simple",
+      "package-name": "sarcina",
+      "include-v-in-tag": true,
+      "include-component-in-tag": false,
+      "bump-minor-pre-major": true,
+      "bump-patch-for-minor-pre-major": false,
+      "release-as": "0.1.0",
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}

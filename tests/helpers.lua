@@ -66,6 +66,7 @@ function M.reset()
     require('sarcina.window').height = 'regular'
     -- Sarcina's own checkout is this repository: a test that wants a self-check points it at a repo of its own.
     require('sarcina.self').root = false
+    require('sarcina.self').pin = nil
     require('sarcina.window').select_mode = false
     require('sarcina.window').clear_marks()
     ui.close_delay = 60000
