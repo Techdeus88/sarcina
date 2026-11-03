@@ -6,7 +6,7 @@ A Neovim plugin manager built around a task engine. Each plugin expands into an 
 
 ## Requirements
 
-- Neovim 0.10 or newer. `setup()` says so and does nothing on an older one.
+- Neovim 0.11 or newer. `setup()` says so and does nothing on an older one.
 - git 2.19 or newer, on your `PATH`, for partial clones (`--filter=blob:none`), `--shallow-since` and `--is-shallow-repository`.
 - A [Nerd Font](https://www.nerdfonts.com) for the rounded ends of the tasks widget. Without one, set `ui = { rounded = false }`.
 
