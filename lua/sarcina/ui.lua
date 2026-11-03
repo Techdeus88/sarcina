@@ -17,6 +17,8 @@ M.show = 'auto'
 M.check_on_open = true
 -- How long a window that opens by itself waits for a colorscheme, ms. See `theme_ready`.
 M.theme_wait = 2000
+-- The black layer behind a window opened by hand: its winblend, 0 solid black to 100 invisible. false: none.
+M.backdrop = 0
 
 M._listeners = {}
 M._messages = {} -- every message of the session, as { msg, level }, for tests and for ui.messages()
@@ -30,6 +32,7 @@ M._header_bufnr = nil
 M._header_winid = nil
 M._footer_bufnr = nil
 M._footer_winid = nil
+M._backdrop_winid = nil
 M._dismissed = false
 M._pinned = false -- opened by hand, so a clean run does not close it
 M._seen_failed = 0
@@ -109,6 +112,13 @@ function M.configure(opts)
     end
     window().height = height
     M.check_on_open = not opts or opts.check_on_open ~= false
+    local backdrop = opts and opts.backdrop
+    if backdrop == nil then backdrop = 0 end
+    if backdrop ~= false and not (type(backdrop) == 'number' and backdrop >= 0 and backdrop <= 100) then
+        M.emit('warning', string.format('Unknown ui.backdrop %s, using 0', tostring(backdrop)))
+        backdrop = 0
+    end
+    M.backdrop = backdrop
 end
 
 -- The keys the footer names. `=` and `-` say which view and which height they switch to.
@@ -181,10 +191,40 @@ local function close_pane(name)
     M['_' .. name .. '_bufnr'], M['_' .. name .. '_winid'] = nil, nil
 end
 
+local function backdrop_valid() return M._backdrop_winid and vim.api.nvim_win_is_valid(M._backdrop_winid) end
+
+-- The whole editor, for the backdrop.
+local function backdrop_config() return { relative = 'editor', row = 0, col = 0, width = vim.o.columns, height = vim.o.lines } end
+
+-- A float over the whole editor, under the windows (zindex 50), so nothing behind them shows through.
+local function open_backdrop()
+    if M.backdrop == false or backdrop_valid() then return end
+    vim.api.nvim_set_hl(0, 'SarcinaBackdrop', { bg = '#000000', default = true })
+    local buf = vim.api.nvim_create_buf(false, true)
+    vim.bo[buf].bufhidden = 'wipe'
+    M._backdrop_winid = vim.api.nvim_open_win(
+        buf,
+        false,
+        vim.tbl_extend(
+            'force',
+            backdrop_config(),
+            { style = 'minimal', focusable = false, zindex = 45, noautocmd = true }
+        )
+    )
+    vim.wo[M._backdrop_winid].winhighlight = 'Normal:SarcinaBackdrop,EndOfBuffer:SarcinaBackdrop'
+    vim.wo[M._backdrop_winid].winblend = M.backdrop
+end
+
+local function close_backdrop()
+    if backdrop_valid() then pcall(vim.api.nvim_win_close, M._backdrop_winid, true) end
+    M._backdrop_winid = nil
+end
+
 local function close_panes()
     for _, name in ipairs(PANES) do
         close_pane(name)
     end
+    close_backdrop()
     shown = nil
 end
 
@@ -210,6 +250,7 @@ end
 -- Puts the windows where the last full draw says: the details one comes and goes with the room for it.
 local function apply_config()
     local config = window().config()
+    if backdrop_valid() then vim.api.nvim_win_set_config(M._backdrop_winid, backdrop_config()) end
     vim.api.nvim_win_set_config(M._winid, config.list)
     for _, name in ipairs({ 'header', 'footer' }) do
         if pane_valid(name) then vim.api.nvim_win_set_config(pane_win(name), config[name]) end
@@ -469,6 +510,8 @@ local function open_window(enter)
     M._header_bufnr, M._footer_bufnr = new_buffer(), new_buffer()
     window().draw(buffers())
     local config = window().config()
+    -- Only a window you open: one that opens by itself during a run must not black out what you are typing in.
+    if enter then open_backdrop() end
     M._winid = vim.api.nvim_open_win(
         M._bufnr,
         enter,
@@ -689,6 +732,7 @@ function M.open()
     M._dismissed = false
     M._pinned = true
     if win_valid() then
+        open_backdrop()
         window().draw(buffers())
         apply_config()
         vim.api.nvim_set_current_win(M._winid)

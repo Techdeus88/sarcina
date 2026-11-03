@@ -59,6 +59,7 @@ function M.reset()
     ui.show = 'auto'
     -- A test that wants the window to look for updates when it opens says so.
     ui.check_on_open = false
+    ui.backdrop = 0
     ui._check_after_run = false
     -- Tests run as a session with a colorscheme, so the window does not wait for one. A test that wants none unsets it.
     if vim.g.colors_name == nil then vim.cmd.colorscheme('default') end

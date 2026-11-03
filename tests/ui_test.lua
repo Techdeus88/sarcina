@@ -321,4 +321,54 @@ test(':Sarcina log opens the log file, and says so when there is none', function
     vim.cmd('close')
 end)
 
+local function backdrop_open() return ui._backdrop_winid ~= nil and vim.api.nvim_win_is_valid(ui._backdrop_winid) end
+
+test('a window opened by hand has a backdrop over the editor, under the window, gone when it closes', function()
+    run({ loaded('a') })
+    ui.open()
+    h.ok(backdrop_open(), 'no backdrop')
+    local config = vim.api.nvim_win_get_config(ui._backdrop_winid)
+    h.eq({ config.width, config.height, config.focusable }, { vim.o.columns, vim.o.lines, false })
+    h.ok(config.zindex < vim.api.nvim_win_get_config(ui._winid).zindex, 'the backdrop is over the window')
+    h.eq(vim.wo[ui._backdrop_winid].winblend, 0)
+    vim.cmd('close')
+    h.eq(backdrop_open(), false)
+end)
+
+test('a window that opens by itself has no backdrop until it is opened by hand', function()
+    run({ failing('a') })
+    h.ok(vim.wait(500, win_open))
+    h.eq(backdrop_open(), false)
+    ui.open()
+    h.ok(backdrop_open(), 'opening by hand added no backdrop')
+    ui.close()
+    h.eq(backdrop_open(), false)
+end)
+
+test('backdrop takes a blend, false turns it off, and an unknown value warns', function()
+    ui.configure({ backdrop = 60 })
+    run({ loaded('a') })
+    ui.open()
+    h.eq(vim.wo[ui._backdrop_winid].winblend, 60)
+    ui.close()
+    ui.configure({ backdrop = false })
+    ui.open()
+    h.eq(backdrop_open(), false)
+    ui.close()
+    ui.configure({ backdrop = 'dim' })
+    h.ok(h.notified('Unknown ui.backdrop dim'))
+    h.eq(ui.backdrop, 0)
+end)
+
+test('the backdrop follows the editor size', function()
+    run({ loaded('a') })
+    ui.open()
+    vim.o.columns, vim.o.lines = vim.o.columns + 10, vim.o.lines + 4
+    vim.api.nvim_exec_autocmds('VimResized', {})
+    h.ok(vim.wait(500, function()
+        local config = vim.api.nvim_win_get_config(ui._backdrop_winid)
+        return config.width == vim.o.columns and config.height == vim.o.lines
+    end), 'the backdrop kept its old size')
+end)
+
 return tests

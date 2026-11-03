@@ -169,6 +169,7 @@ require('sarcina').setup({
         height = 'regular', -- 80% of the editor tall
         rounded = true, -- rounded ends on the tasks widget
         check_on_open = true, -- look for updates when the window opens
+        backdrop = 0, -- black out the editor behind a window you open
     },
 })
 ```
@@ -254,9 +255,19 @@ How the width is shared between the list and the details. The window is 80% of t
 
 A check never moves a plugin; `:Sarcina update` does.
 
+### `ui.backdrop`
+
+| Value | Does |
+| --- | --- |
+| `0` (default) | a window you open (`:Sarcina panel`) covers the editor behind it in solid black |
+| `1`–`100` | the same layer with that `winblend`, so the editor shows through dimmed; `100` is invisible. Needs `termguicolors` |
+| `false` | no backdrop |
+
+A window that opens by itself during a run gets no backdrop, so it never blacks out the buffer you are typing in; opening it by hand then adds one. The colour is the `SarcinaBackdrop` highlight group.
+
 ### Values sarcina does not know
 
-An unknown `show`, `view` or `height` is named in a warning, and the default is used. An unknown key, such as `ui = { veiw = 'split' }`, is ignored without a word.
+An unknown `show`, `view`, `height` or `backdrop` is named in a warning, and the default is used. An unknown key, such as `ui = { veiw = 'split' }`, is ignored without a word.
 
 ### Tuning
 
