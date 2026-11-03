@@ -914,6 +914,19 @@ function M.nearest(lnum, step)
     end
 end
 
+--- The first and the last line the cursor can rest on, or nil when the list has no plugin.
+function M.ends()
+    local first, last
+    local at = 1
+    while entries[at] do
+        if entries[at].name then
+            first, last = first or at, at
+        end
+        at = at + 1
+    end
+    return first, last
+end
+
 --- The window closed: the next one starts with a fresh selection.
 function M.closed() selected = nil end
 

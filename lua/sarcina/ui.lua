@@ -75,6 +75,8 @@ local function new_buffer()
     local buf = vim.api.nvim_create_buf(false, true)
     vim.bo[buf].bufhidden = 'wipe'
     vim.bo[buf].filetype = 'sarcina'
+    -- Only window.lua writes to it, and only for the length of a draw.
+    vim.bo[buf].modifiable = false
     return buf
 end
 
@@ -306,6 +308,47 @@ local function map_actions(buf)
     end
 end
 
+-- The list moves up and down and nowhere else: no key takes the cursor sideways or scrolls the view sideways, and
+-- no key that edits can reach the buffer or put an error in the command line.
+local SIDEWAYS = {
+    'h', '<Left>', '<Right>', '0', '^', '$', '<Home>', '<End>', 'w', 'W', 'b', 'B', 'e', 'E', 'ge', 'gE', ';',
+    ',', '|', 'zh', 'zl', 'zH', 'zL', 'zs', 'ze', '<S-Left>', '<S-Right>', '<C-Left>', '<C-Right>', 'g0',
+    'g^', 'g$', 'gm', 'gM', '<ScrollWheelLeft>', '<ScrollWheelRight>',
+}
+-- These wait for a character, which has to go too or it would run as a key of its own.
+local SIDEWAYS_WITH_CHAR = { 'f', 'F', 't', 'T' }
+local EDITING = { 'a', 'A', 'o', 'O', 'I', 'x', 'X', 'p', 'P', 's', 'S', 'r', 'R', 'J', 'gJ', '~', '.', '<C-r>', 'D' }
+
+local function lock_list(buf)
+    local function map(modes, key, rhs)
+        vim.keymap.set(modes, key, rhs, { buffer = buf, nowait = true, silent = true })
+    end
+    for _, key in ipairs(SIDEWAYS) do
+        map({ 'n', 'x' }, key, '<Nop>')
+    end
+    for _, key in ipairs(SIDEWAYS_WITH_CHAR) do
+        map({ 'n', 'x' }, key, function() vim.fn.getcharstr() end)
+    end
+    for _, key in ipairs(EDITING) do
+        map('n', key, '<Nop>')
+    end
+end
+
+-- On the first row the cursor can rest on, the lines above it stay in view: the blank line at the top and a
+-- section title. On the last row, the lines below it. Vim scrolls only as far as the cursor, which hid them.
+local function show_ends(lnum)
+    local first, last = window().ends()
+    local view = vim.api.nvim_win_call(M._winid, vim.fn.winsaveview)
+    local top
+    if lnum == first and view.topline > 1 then
+        top = 1
+    elseif lnum == last then
+        local bottom = vim.api.nvim_buf_line_count(M._bufnr) - vim.api.nvim_win_get_height(M._winid) + 1
+        if view.topline < bottom then top = bottom end
+    end
+    if top then vim.api.nvim_win_call(M._winid, function() vim.fn.winrestview({ topline = top }) end) end
+end
+
 local function ensure_buffer()
     if buf_valid() then return end
     window().define_highlights()
@@ -332,6 +375,7 @@ local function ensure_buffer()
         desc = 'Show the changelog of a Sarcina update, or its tasks',
     })
     map_actions(M._bufnr)
+    lock_list(M._bufnr)
     for key, yes in pairs({ y = true, n = false, ['<Esc>'] = false }) do
         vim.keymap.set('n', key, function()
             if M._question then M._answer(yes) end
@@ -362,7 +406,10 @@ local function ensure_buffer()
         callback = function()
             if not win_valid() then return end
             -- The cursor rests only on rows of plugins: off a header or a blank line it goes on the way it moved.
-            local lnum = vim.api.nvim_win_get_cursor(M._winid)[1]
+            local pos = vim.api.nvim_win_get_cursor(M._winid)
+            local lnum = pos[1]
+            -- A click can land the cursor in a column; the list only has rows.
+            if pos[2] ~= 0 then vim.api.nvim_win_set_cursor(M._winid, { lnum, 0 }) end
             local entry = window().entry_at(lnum)
             if not (entry and entry.name) then
                 local to = window().nearest(lnum, lnum < (M._last_lnum or 1) and -1 or 1)
@@ -372,6 +419,7 @@ local function ensure_buffer()
                 end
             end
             M._last_lnum = lnum
+            show_ends(lnum)
             window().select(lnum)
             show_details()
         end,

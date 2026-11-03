@@ -1460,4 +1460,74 @@ test('closing the window answers a waiting question with no', function()
     confirm.enabled = false
 end)
 
+test('the list moves up and down only: sideways keys do nothing, and a click lands in column 0', function()
+    local plugins = {}
+    for _, name in ipairs({ 'ha', 'hb' }) do
+        table.insert(plugins, { name = name, tasks = { h.lua('rtp', h.noop) } })
+    end
+    h.register(plugins)
+    h.run(plugins)
+    with_size(200, 50, function()
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        local function press(keys) vim.api.nvim_feedkeys(vim.keycode(keys), 'xt', false) end
+        vim.api.nvim_win_set_cursor(ui._winid, { window.line('ha'), 0 })
+        for _, key in ipairs({ 'h', '$', 'w', '<Right>', 'fa', 'tb', 'e', '0' }) do
+            press(key)
+            h.eq(vim.api.nvim_win_get_cursor(ui._winid), { window.line('ha'), 0 }, key)
+        end
+        vim.api.nvim_win_set_cursor(ui._winid, { window.line('ha'), 9 })
+        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+        h.eq(vim.api.nvim_win_get_cursor(ui._winid)[2], 0)
+        press('j')
+        h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], window.line('hb'))
+    end)
+end)
+
+test('the list buffer cannot be edited by hand: it is not modifiable, and editing keys do nothing', function()
+    h.register({ { name = 'ea', tasks = { h.lua('rtp', h.noop) } } })
+    with_size(200, 50, function()
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        h.eq(vim.bo[ui._bufnr].modifiable, false)
+        h.eq(vim.bo[ui._header_bufnr].modifiable, false)
+        h.eq(vim.bo[ui._footer_bufnr].modifiable, false)
+        local before = vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false)
+        for _, key in ipairs({ 'x', 'o', 'p', 'J', 'D', 'r' }) do
+            vim.api.nvim_feedkeys(vim.keycode(key .. 'z'), 'xt', false)
+        end
+        h.eq(vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false), before)
+    end)
+end)
+
+test('a long list scrolled away and back shows its blank line at the top, and at the bottom', function()
+    local plugins = {}
+    for i = 1, 60 do
+        table.insert(plugins, { name = 'long' .. i, tasks = { h.lua('rtp', h.noop) } })
+    end
+    h.register(plugins)
+    h.run(plugins)
+    with_size(200, 50, function()
+        ui.open()
+        vim.api.nvim_set_current_win(ui._winid)
+        local function press(keys, times)
+            for _ = 1, times or 1 do
+                vim.api.nvim_feedkeys(keys, 'xt', false)
+                vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+            end
+        end
+        local function topline() return vim.api.nvim_win_call(ui._winid, vim.fn.winsaveview).topline end
+        local count = vim.api.nvim_buf_line_count(ui._bufnr)
+        h.ok(count > vim.api.nvim_win_get_height(ui._winid), 'the list fits the window')
+        press('G')
+        press('k', count)
+        h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], window.line('long1'))
+        h.eq(topline(), 1)
+        press('j', count)
+        h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], window.line('long60'))
+        h.eq(topline(), count - vim.api.nvim_win_get_height(ui._winid) + 1)
+        h.eq(buffer_lines()[count], '')
+    end)
+end)
+
 return tests
