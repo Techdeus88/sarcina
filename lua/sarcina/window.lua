@@ -148,12 +148,8 @@ M.changelog = false
 
 local function checker() return require('sarcina.checker') end
 
--- The list has a section per timing, in this order, each with its plugins in the order they loaded.
-local SECTIONS = {
-    { timing = 'now', title = 'Now' },
-    { timing = 'later', title = 'Later' },
-    { timing = 'trigger', title = 'Triggered' },
-}
+-- The list shows the plugins by timing in this order, each timing's plugins in the order they loaded.
+local TIMING_ORDER = { 'now', 'later', 'trigger' }
 
 --- Whether `name` is a view.
 function M.is_view(name) return VIEWS[name] ~= nil end
@@ -179,7 +175,7 @@ function M.toggle_height()
     return M.height
 end
 
--- How far a row of a section sits in from its header.
+-- How far a row sits in from the left edge of the list.
 local INDENT = '   '
 
 local CAP_LEFT, CAP_RIGHT = vim.fn.nr2char(0xe0b6), vim.fn.nr2char(0xe0b4)
@@ -363,12 +359,6 @@ local function breaking_count(commits)
     return count
 end
 
--- A section header: its title and how many lines it holds, then `extra` parts.
-local function section_line(title, count, extra)
-    local parts = { { ' ' }, { string.format('%s (%d)', title, count), 'SarcinaSection' } }
-    return build_line(vim.list_extend(parts, extra or {}))
-end
-
 -- The heading of the Updates section while a check runs or after one that had something to check, the first
 -- line of the list level with the name of the plugin over the details: `Updates (N)`, then that a check runs,
 -- that nothing was found, how many remotes could not say, and the key for the changelog. nil for no heading.
@@ -418,31 +408,30 @@ local function update_line(name, info)
     return build_line(vim.list_extend(head, tail))
 end
 
--- The rows of `list` grouped by section, each group in the order of `list`. A row with no known timing is later.
-local function grouped(list)
+-- The rows of `list` in the order the list shows them: the plugins that load now, then the ones that load
+-- later, then the ones a trigger loads, each timing in the order of `list`. A row with no known timing is later.
+local function ordered(list)
     local by_timing = {}
-    for _, section in ipairs(SECTIONS) do
-        by_timing[section.timing] = {}
+    for _, timing in ipairs(TIMING_ORDER) do
+        by_timing[timing] = {}
     end
     for _, row in ipairs(list) do
         table.insert(by_timing[row.timing] or by_timing.later, row)
     end
-    return by_timing
-end
-
--- The names of `list` in the order the sections show them.
-local function shown_order(list)
-    local order, by_timing = {}, grouped(list)
-    for _, section in ipairs(SECTIONS) do
-        for _, row in ipairs(by_timing[section.timing]) do
-            table.insert(order, row.name)
-        end
+    local sorted = {}
+    for _, timing in ipairs(TIMING_ORDER) do
+        vim.list_extend(sorted, by_timing[timing])
     end
-    return order
+    return sorted
 end
 
--- The lines of the list: the updates a check found, under the Updates heading, then a section per
--- timing. Sections are a blank line apart. Fills `entries`, `line_of`, `rows` and `names`.
+-- The names of `list` in the order the list shows them.
+local function shown_order(list)
+    return vim.tbl_map(function(row) return row.name end, ordered(list))
+end
+
+-- The lines of the list: the updates a check found, under the Updates heading, then every plugin in one run,
+-- a blank line above them when there are updates. Fills `entries`, `line_of`, `rows` and `names`.
 local function layout(list)
     local lines = {}
     local function add(line, entry)
@@ -465,19 +454,13 @@ local function layout(list)
         add(update_line(name, check.updates[name]), { kind = 'update', name = name })
         update_line_of[name] = #lines
     end
-    local by_timing = grouped(list)
-    for _, section in ipairs(SECTIONS) do
-        local members = by_timing[section.timing]
-        if #members > 0 then
-            if #lines > 1 then add(build_line({}), { kind = 'blank' }) end
-            add(section_line(section.title, #members), { kind = 'section' })
-            for _, row in ipairs(members) do
-                table.insert(names, row.name)
-                rows[row.name] = row
-                add(row_line(row), { kind = 'plugin', name = row.name })
-                line_of[row.name] = #lines
-            end
-        end
+    local plugins = ordered(list)
+    if #plugins > 0 and #lines > 1 then add(build_line({}), { kind = 'blank' }) end
+    for _, row in ipairs(plugins) do
+        table.insert(names, row.name)
+        rows[row.name] = row
+        add(row_line(row), { kind = 'plugin', name = row.name })
+        line_of[row.name] = #lines
     end
     add(build_line({}), { kind = 'blank' })
     return lines

@@ -415,8 +415,8 @@ local function lock_list(buf)
     end
 end
 
--- On the first row the cursor can rest on, the lines above it stay in view: the blank line at the top and a
--- section title. On the last row, the lines below it. Vim scrolls only as far as the cursor, which hid them.
+-- On the first row the cursor can rest on, the lines above it stay in view: the blank line at the top and the
+-- Updates heading. On the last row, the lines below it. Vim scrolls only as far as the cursor, which hid them.
 local function show_ends(lnum)
     local first, last = window().ends()
     local view = vim.api.nvim_win_call(M._winid, vim.fn.winsaveview)

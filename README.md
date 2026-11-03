@@ -499,21 +499,23 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 │ Total: 6 plugins                                 Sarcina               ⤓ Installing 18/48  ████░░░░░░  37% │
 │ ● 3  ○ 3                                       13/25 tasks                      ⤓ 18 installed  ✘ 1 failed │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-╭ Updates (1) <CR> changelog ──────────────────────────────────────────────╮╭ nvim-treesitter ───────────────╮
+╭──────────────────────────────────────────────────────────────────────────╮╭────────────────────────────────╮
 │                                                                          ││                                │
-│    ↑ nvim-treesitter 0195cd6 feat(jinja)… · 1 commit behind  △ 1 breaking││state     ✔ loaded              │
-│                                                                          ││tasks     4/4 tasks ✔ 40ms      │
-│ Now (1)                                                                  ││timing    later                 │
-│   plenary.nvim (110ms) now  3/3  tasks ✔  loaded                         ││src       https://github.com/   │
-│                                                                          ││          nvim-treesitter/      │
-│ Later (4)                                                                ││          nvim-treesitter       │
-│   nvim-treesitter (40ms) later  4/4  tasks ✔  loaded                     ││rev       a1b2c3d               │
-│   telescope.nvim (2.1s) later  1/6  tasks ▶  installing · Receiving obje…││update    0195cd6 · 1 commit    │
-│   avante.nvim (120ms) later  2/3  tasks ✘  failed · make: command not fo…││          behind  △ 1 breaking  │
-│   smart-splits.nvim (62ms) later  1/3  tasks ⊘  blocked · dependency ava…││                                │
+│ Updates (1) <CR> changelog                                               ││nvim-treesitter                 │
+│    ↑ nvim-treesitter 0195cd6 feat(jinja)… · 1 commit behind  △ 1 breaking││                                │
+│                                                                          ││state     ✔ loaded              │
+│   plenary.nvim (110ms) now  3/3  tasks ✔  loaded                         ││tasks     4/4 tasks ✔ 40ms      │
+│   nvim-treesitter (40ms) later  4/4  tasks ✔  loaded                     ││timing    later                 │
+│   telescope.nvim (2.1s) later  1/6  tasks ▶  installing · Receiving obje…││src       https://github.com/   │
+│   avante.nvim (120ms) later  2/3  tasks ✘  failed · make: command not fo…││          nvim-treesitter/      │
+│   smart-splits.nvim (62ms) later  1/3  tasks ⊘  blocked · dependency ava…││          nvim-treesitter       │
+│   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││rev       a1b2c3d               │
+│                                                                          ││update    0195cd6 · 1 commit    │
+│                                                                          ││          behind  △ 1 breaking  │
+│                                                                          ││                                │
 │                                                                          ││Changelog                       │
-│ Triggered (1)                                                            ││ △ 0195cd6 feat(jinja)!:        │
-│   blink.cmp (8ms) trigger  2/6  tasks ○  waiting for InsertEnter         ││   update parser and queries    │
+│                                                                          ││ △ 0195cd6 feat(jinja)!:        │
+│                                                                          ││   update parser and queries    │
 │                                                                          ││                                │
 ╰──────────────────────────────────────────────────────────────────────────╯╰────────────────────────────────╯
 ╭────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
@@ -521,20 +523,20 @@ Four windows make one block, 80% of the editor wide and 80% tall (95% with `-`, 
 ╰─── q close · = 50/50 · v select · ⏎ changelog · c/C check · u/U update · i install · l load · d delete ────╯
 ```
 
-**The header** has the total on the left, `Total: 6 plugins`, and on its right the work going on now: what kind (installing, updating, checking, building, or a background check for updates), how many of those jobs ended out of all of them, the plugin at it, a bar and a percentage. When nothing runs that side is empty. Below, on the left, are how many plugins loaded and how many did not, `● 3  ○ 3`; in the middle how far all their tasks have got together, `13/25 tasks`, the left numbers of the rows added up over their right numbers, so it counts up in real time; and on the right what the session did so far, each only once there is one: `⤓` plugins cloned, `⚙` builds that ran, `↑` updates that moved a plugin, `✕` plugin directories deleted, `✘` tasks that failed. **The footer** has on the left the picks of the select view, or `v to select plugins` when there is none, and the startup time on the right. On its bottom border, in the middle, are the keys of the list: `q` close, `=` the other view, `-` the other height, `v` select, `⏎` changelog, `c`/`C` check, `u`/`U` update, `i` install, `l` load, `d` delete, `^d`/`^u` scroll the details; in the select view, the keys that act on the picks. A footer too narrow for all of them drops keys from the end. The counts per timing are in the section headers.
+**The header** has the total on the left, `Total: 6 plugins`, and on its right the work going on now: what kind (installing, updating, checking, building, or a background check for updates), how many of those jobs ended out of all of them, the plugin at it, a bar and a percentage. When nothing runs that side is empty. Below, on the left, are how many plugins loaded and how many did not, `● 3  ○ 3`; in the middle how far all their tasks have got together, `13/25 tasks`, the left numbers of the rows added up over their right numbers, so it counts up in real time; and on the right what the session did so far, each only once there is one: `⤓` plugins cloned, `⚙` builds that ran, `↑` updates that moved a plugin, `✕` plugin directories deleted, `✘` tasks that failed. **The footer** has on the left the picks of the select view, or `v to select plugins` when there is none, and the startup time on the right. On its bottom border, in the middle, are the keys of the list: `q` close, `=` the other view, `-` the other height, `v` select, `⏎` changelog, `c`/`C` check, `u`/`U` update, `i` install, `l` load, `d` delete, `^d`/`^u` scroll the details; in the select view, the keys that act on the picks. A footer too narrow for all of them drops keys from the end. The counts per timing are in `:Sarcina stats`.
 
-**The list** has a section per timing, `Now`, `Later` and `Triggered`, each under a header with its count (`Later (18)`) and a blank line before the next; a section with no plugins is left out. Within a section the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below in manifest order, and a row moves up when its plugin loads. The cursor rests only on rows of plugins: moving onto a header or a blank line takes it on, the way it moved, to the next plugin. The details always show the plugin of the row under the cursor, and nothing when there is none.
+**The list** shows every plugin in one run, with no headers: first the plugins that load `now`, then the `later` ones, then the ones a trigger loads, and each row names its timing. Within a timing the rows are in the order the plugins load. The order is recorded, not sorted: `track` keeps the jobs in the order they ended, and a plugin takes its place where its `rtp` task ended. Plugins that have not loaded yet wait below the loaded ones of their timing in manifest order, and a row moves up when its plugin loads. A blank line at each end keeps the rows off the borders. The cursor rests only on rows of plugins: moving onto a blank line or the Updates heading takes it on, the way it moved, to the next plugin. The details always show the plugin of the row under the cursor, and nothing when there is none.
 
 ### Updates
 
-When the window opens it looks for updates in the background (see `check` under [Commands](#commands)). The title on the top border of the list, level with the name of the plugin over the details, says how it goes, and the updates it finds head the list:
+When the window opens it looks for updates in the background (see `check` under [Commands](#commands)). The Updates heading, the second line of the list, level with the name of the plugin over the details, says how it goes, and the updates it finds head the list:
 
 ```
-╭ Updates (1) ↻ checking… <CR> changelog ───────────────────────────────────────────────────╮╭ nvim-treesitter ──
-│    ↑ nvim-treesitter 0195cd6 feat(jinja)!: update parser and queries · 1 commit behind  △ 1 breaking││state     ✔ loaded
+ Updates (1) ↻ checking… <CR> changelog
+    ↑ nvim-treesitter 0195cd6 feat(jinja)!: update parser and queries · 1 commit behind  △ 1 breaking
 ```
 
-While the check runs the title says `↻ checking…`. Each plugin that is behind gets a row as its answer comes in: the commit it would move to, the subject of the newest commit, how many commits it is behind, and how many of them break something. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. The arrow sits one cell in from the names of the rows below. The rows move with the cursor like the others, and in the select view (`v`) they have a pick box too: `Space` picks the plugin, here and in its section. The details show the plugin with an `update` line. An `update` that moves a plugin, or finds it where it should be, takes it off the list, so it shows only in its section again; one that leaves it alone, such as for changes of its own, keeps it there. `<CR>` switches the details to the plugin's changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. A check that found nothing says `✔ up to date`, and remotes that could not be reached are counted in the title. Without a check the list has no title.
+While the check runs the heading says `↻ checking…`. Each plugin that is behind gets a row as its answer comes in: the commit it would move to, the subject of the newest commit, how many commits it is behind, and how many of them break something. A commit breaks something when it says so the way conventional commits do: `feat!:` or `feat(scope)!:` in its subject, or a `BREAKING CHANGE` footer. The arrow sits one cell in from the names of the rows below. The rows move with the cursor like the others, and in the select view (`v`) they have a pick box too: `Space` picks the plugin, here and in its own row. The details show the plugin with an `update` line. An `update` that moves a plugin, or finds it where it should be, takes it off the Updates list, so it shows only in its own row again; one that leaves it alone, such as for changes of its own, keeps it there. `<CR>` switches the details to the plugin's changelog, one line per commit with the breaking ones in red, and `<CR>` again goes back to its tasks. A check that found nothing says `✔ up to date`, and remotes that could not be reached are counted in the heading. Without a check the list has no heading.
 
 **Sarcina itself** is checked first, on its own, before the plugins it manages: the directory its files run from, wherever that is (a bootstrap in your config often clones it into the plugins directory), followed on the `stable` branch, the latest release, or on what [`pin`](#pin) names. When it is behind, its update leads the list as `↑ sarcina …`, and its details say where it runs from and list the commits it would bring. `:Sarcina update` (or `U`, or `u` on its row) moves it like a plugin, and `:Sarcina update sarcina` moves only it; restart Neovim to run the new code. A checkout that is not a git clone is not checked. Looking ahead never cuts the history of a full clone: only the shallow clones Sarcina makes for plugins fetch from a date. `clean`, `delete` and the startup warning about directories no spec owns never count Sarcina's own directory as a plugin.
 

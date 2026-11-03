@@ -134,39 +134,35 @@ test('a check of some plugins keeps what the last check found for the others', f
 end)
 
 test(
-    'the list shows a section per timing, in the order now, later, triggered, each with its count',
+    'the list is one run of plugins, now then later then triggered, each in load order, with no headers',
     function()
         h.register({
             { name = 'n1', timing = 'now' },
             { name = 'l1' },
             { name = 't1', timing = 'trigger' },
             { name = 'l2' },
+            { name = 'n2', timing = 'now' },
         })
         -- Flat ends: the rounded ones are glyphs a diff of the lines does not show.
         window.rounded = false
         ui.open()
         window.rounded = true
-        -- A blank line above the content and below it keeps it off the borders.
+        -- A blank line above the content and below it keeps it off the borders, and none between the rows.
         h.eq(buffer_lines(), {
             '',
-            ' Now (1)',
             '   n1 now  0/0  tasks …  pending',
-            '',
-            ' Later (2)',
+            '   n2 now  0/0  tasks …  pending',
             '   l1 later  0/0  tasks …  pending',
             '   l2 later  0/0  tasks …  pending',
-            '',
-            ' Triggered (1)',
             '   t1 trigger  0/0  tasks …  pending',
             '',
         })
         h.eq(window.entry_at(1), { kind = 'blank' })
-        h.eq(window.entry_at(2), { kind = 'section' })
-        h.eq(window.entry_at(4), { kind = 'blank' })
+        h.eq(window.entry_at(2), { kind = 'plugin', name = 'n1' })
+        h.eq(window.entry_at(7), { kind = 'blank' })
     end
 )
 
--- The title on the top border of the list, as text.
 -- The Updates heading: the first line of the list under the blank one, or '' when the list has none.
 local function list_title()
     local line = buffer_lines()[2] or ''
@@ -200,7 +196,8 @@ test(
                 .. ' feat: two · 3 commits behind  △ 2 breaking'
         )
         h.eq(lines[4], '')
-        h.eq(lines[5], ' Later (2)')
+        h.ok(lines[5]:find('^   upd%.nvim'), lines[5])
+        h.ok(lines[6]:find('^   other'), lines[6])
         h.eq(lines[#lines], '')
         h.eq(window.entry_at(3), { kind = 'update', name = 'upd.nvim' })
         -- The cursor moves onto an update, and the details show that plugin.
@@ -208,6 +205,10 @@ test(
         vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
         h.eq(window.selected(), 'upd.nvim')
         h.ok(details_text():find('update%s+%x+ · 3 commits behind  △ 2 breaking'), details_text())
+        -- The Updates heading names no plugin: a cursor put on it goes on to the update below.
+        vim.api.nvim_win_set_cursor(ui._winid, { 2, 0 })
+        vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
+        h.eq(vim.api.nvim_win_get_cursor(ui._winid)[1], 3)
         window.rounded = true
     end
 )
@@ -242,13 +243,13 @@ test(
         check()
         ui._flush()
         h.eq(list_title(), ' Updates (0) ✔ up to date ')
-        h.eq(buffer_lines()[4], ' Later (1)')
+        h.ok(buffer_lines()[4]:find('^   fresh%.nvim'), buffer_lines()[4])
         checker._reset()
         h.register({ { name = 'nothing' } })
         check()
         ui._flush()
         h.eq(list_title(), '')
-        h.eq(buffer_lines()[2], ' Later (1)')
+        h.ok(buffer_lines()[2]:find('^   nothing'), buffer_lines()[2])
     end
 )
 

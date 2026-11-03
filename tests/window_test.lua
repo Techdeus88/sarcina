@@ -25,10 +25,10 @@ end
 
 local function win_open() return ui._winid ~= nil and vim.api.nvim_win_is_valid(ui._winid) end
 
--- Every line of the list: the section headers, the blank lines between sections, and the rows.
+-- Every line of the list: the blank lines at the ends, the Updates heading when there is one, and the rows.
 local function buffer_lines() return vim.api.nvim_buf_get_lines(ui._bufnr, 0, -1, false) end
 
--- The rows of the plugins, in the order the list shows them, without the section headers.
+-- The rows of the plugins, in the order the list shows them, without the heading and the blank lines.
 local function lines()
     local rows = {}
     for lnum, line in ipairs(buffer_lines()) do
@@ -1156,24 +1156,23 @@ test('closing the list closes the other three windows, and so does q', function(
 end)
 
 test(
-    'the cursor rests only on rows of plugins, going on the way it moved past headers and blank lines',
+    'the cursor rests only on rows of plugins, going on the way it moved off the blank lines at the ends',
     function()
         h.register({ { name = 'n1', timing = 'now' }, loaded('l1'), loaded('l2') })
         vim.o.columns, vim.o.lines = 200, 50
         ui.open()
         vim.api.nvim_set_current_win(ui._winid)
-        -- 1 blank, 2 Now, 3 n1, 4 blank, 5 Later, 6 l1, 7 l2, 8 blank
+        -- 1 blank, 2 n1, 3 l1, 4 l2, 5 blank
         local function move(lnum)
             vim.api.nvim_win_set_cursor(ui._winid, { lnum, 0 })
             vim.api.nvim_exec_autocmds('CursorMoved', { buffer = ui._bufnr })
             return vim.api.nvim_win_get_cursor(ui._winid)[1], window.selected()
         end
-        h.eq({ move(3) }, { 3, 'n1' })
-        h.eq({ move(4) }, { 6, 'l1' }) -- down onto the blank line: on to l1
-        h.eq({ move(7) }, { 7, 'l2' })
-        h.eq({ move(8) }, { 7, 'l2' }) -- nothing below the last plugin: back to it
-        h.eq({ move(5) }, { 3, 'n1' }) -- up onto the Later header: back to n1
-        h.eq({ move(1) }, { 3, 'n1' }) -- nothing above the first header: the first plugin below it
+        h.eq({ move(2) }, { 2, 'n1' })
+        h.eq({ move(3) }, { 3, 'l1' })
+        h.eq({ move(4) }, { 4, 'l2' })
+        h.eq({ move(5) }, { 4, 'l2' }) -- nothing below the last plugin: back to it
+        h.eq({ move(1) }, { 2, 'n1' }) -- nothing above the first plugin: the first plugin below it
         h.eq(detail_name(), 'n1')
     end
 )
@@ -1182,11 +1181,11 @@ test('a line with no plugin shows no details', function()
     h.register({ loaded('a') })
     vim.o.columns, vim.o.lines = 200, 50
     ui.open()
-    window.select(2) -- the Later header
+    window.select(1) -- the blank line at the top
     h.eq(window.selected(), nil)
     h.eq(window.draw_details(ui._detail_bufnr), nil)
     h.eq(details(), { '' })
-    window.select(3)
+    window.select(2)
     h.eq(window.draw_details(ui._detail_bufnr), 'a')
     -- A blank line above the name of the plugin, one under it, and one below the details.
     local shown = details()
@@ -1203,11 +1202,10 @@ test('entry_at maps the lines of the list to their plugins', function()
     h.register({ loaded('a'), loaded('b') })
     ui.open()
     h.eq(window.entry_at(1), { kind = 'blank' })
-    h.eq(window.entry_at(2), { kind = 'section' })
-    h.eq(window.entry_at(3), { kind = 'plugin', name = 'a' })
-    h.eq(window.entry_at(4), { kind = 'plugin', name = 'b' })
-    h.eq(window.entry_at(5), { kind = 'blank' })
-    h.eq(window.entry_at(6), nil)
+    h.eq(window.entry_at(2), { kind = 'plugin', name = 'a' })
+    h.eq(window.entry_at(3), { kind = 'plugin', name = 'b' })
+    h.eq(window.entry_at(4), { kind = 'blank' })
+    h.eq(window.entry_at(5), nil)
 end)
 
 test('an install of what is already on disk never opens the window', function()
