@@ -29,6 +29,23 @@ function M.get(name)
     return found[1]
 end
 
+-- A directory on disk that no spec owns is a plugin the user took out of their specs, or switched off, and forgot to
+-- delete. It says so in the header; an empty manifest says nothing, since a spec file that failed to load would
+-- make every directory look forgotten.
+function M._warn_stale(resolved)
+    if #resolved == 0 then return end
+    local stale = require('sarcina.installer').stale(resolved)
+    if #stale == 0 then return end
+    ui.emit(
+        'warn',
+        string.format(
+            '%d on disk, not in your specs: %s · :Sarcina delete <name> or clean!',
+            #stale,
+            table.concat(stale, ', ')
+        )
+    )
+end
+
 --- User‑facing entry point.
 --- Call `require('sarcina').setup()` after adding Sarcina to your runtimepath.
 --- Installed `now` plugins load before it returns; the rest runs in the background once the UI is up,
@@ -48,6 +65,7 @@ function M.setup(opts)
     -- 2️⃣ Resolve dependencies and order plugins
     local resolved = resolver.resolve(specs)
     stats.register(resolved)
+    M._warn_stale(resolved)
 
     -- 3️⃣ Load the installed `now` plugins at once and queue the rest for after the UI is up. Installs go
     -- first, then builds, then the `later` plugins and the triggers of the lazy ones.

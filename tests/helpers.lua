@@ -24,6 +24,8 @@ end
 function M.reset()
     size = size or { vim.o.columns, vim.o.lines }
     vim.o.columns, vim.o.lines = size[1], size[2]
+    -- Every test starts with no plugin on disk, or the warning about directories no spec owns would be about the last test.
+    vim.fn.delete(require('sarcina.paths').plugins_dir(), 'rf')
     M.notes = {}
     M.stray = {}
     local ui_module = require('sarcina.ui')
